@@ -196,4 +196,11 @@ void *dvmHeapSourceGetImmuneLimit(bool isPartial);
  */
 size_t dvmHeapSourceGetMaximumSize(void);
 
+/*
+ * Initiates concurrent Garbage collection
+ * Used for testing
+ */
+
+void dvmInitConcGC(void);
+
 #endif  // DALVIK_HEAP_SOURCE_H_

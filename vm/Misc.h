@@ -249,6 +249,28 @@ u8 dvmGetThreadCpuTimeNsec(void);
 INLINE u8 dvmGetThreadCpuTimeUsec(void) {
     return dvmGetThreadCpuTimeNsec() / 1000;
 }
+/*
+ * Per-thread CPU time, in millis.
+ */
+INLINE u8 dvmGetThreadCpuTimeMsec(void) {
+    return dvmGetThreadCpuTimeNsec() / 1000000;
+}
+
+// Start Robust modification
+//Jahid: added methods to get process CPU time.
+
+/*
+ * Get the current per-process CPU time.
+ */
+u8 dvmGetTotalProcessCpuTimeNsec(void);
+
+/*
+ * Per-Process CPU time, in micros
+ */
+INLINE u8 dvmGetTotalProcessCpuTimeMsec(void) {
+    return dvmGetTotalProcessCpuTimeNsec() / 1000000;
+}
+// End robust modification
 
 /*
  * Like dvmGetThreadCpuTimeNsec, but for a different thread.

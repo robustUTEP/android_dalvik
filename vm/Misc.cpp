@@ -472,6 +472,26 @@ u8 dvmGetThreadCpuTimeNsec()
 #endif
 }
 
+// Start Robust modification
+
+//Jahid: added methods to get process cpu time.
+/*
+ * Get the per-process CPU time, in nanoseconds
+ *
+ * The amount of time the process had been executing
+ */
+u8 dvmGetTotalProcessCpuTimeNsec(void)
+{
+#ifdef HAVE_POSIX_CLOCKS
+    struct timespec now;
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &now);
+    return (u8)now.tv_sec*1000000000LL + now.tv_nsec;
+#else
+    return (u8) -1;
+#endif
+}
+// End Robust modification
+
 /*
  * Get the per-thread CPU time, in nanoseconds, for the specified thread.
  */

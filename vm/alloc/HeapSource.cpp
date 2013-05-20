@@ -1430,3 +1430,9 @@ void *dvmHeapSourceGetImmuneLimit(bool isPartial)
         return NULL;
     }
 }
+
+void dvmInitConcGC()
+{
+	dvmSignalCond(&gHs->gcThreadCond);
+	return;
+}

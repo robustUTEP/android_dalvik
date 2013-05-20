@@ -99,4 +99,19 @@ bool dvmWaitForConcurrentGcToComplete(void);
  */
 bool dvmIsValidObject(const Object* obj);
 
+/*
+ * LogStartup
+ */
+void initLogFile(void);
+
+/*
+ * write when mallocs done
+ */
+void mallocDone(bool mallocFailed,u8 currentMallocTime,	int currentSequenceNumber);
+
+/*
+ * runs custom GC policy
+ */
+void *rbMalloc(size_t size, int currentSequenceNumber);
+
 #endif  // DALVIK_ALLOC_HEAP_H_
