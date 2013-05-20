@@ -26,7 +26,7 @@ unsigned int intervals;
 
 size_t lastRequestedSize = 0;
 //char processName[128];
-string processName;
+extern string processName;
 static int numAllocs = 0; // number of allocations
 static size_t amountAlloc = 0; // total size allocd
 int* freeHistory; // histogram
@@ -104,4 +104,12 @@ u8 dvmGetRTCTimeNsec(void)
  */
 INLINE u8 dvmGetRTCTimeMsec(void) {
     return dvmGetRTCTimeNsec() / 1000000;
+}
+
+/* Wrapper for log file initialization.   */
+static int initLogDone;
+inline void initLogFile() 
+{
+  if (initLogDone) return;
+  _initLogFile();
 }

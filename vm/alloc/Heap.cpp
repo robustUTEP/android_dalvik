@@ -118,8 +118,7 @@ bool dvmHeapStartupAfterZygote()
 
 void dvmHeapShutdown()
 {
-	fflush(fileLog);
-	fclose(fileLog);
+  fileLog && fclose(fileLog);
 //TODO: make sure we're locked
     if (gDvm.gcHeap != NULL) {
         dvmCardTableShutdown();
@@ -185,7 +184,8 @@ static void gcForMalloc(bool clearSoftReferences)
  */
 static void *tryMalloc(size_t size)
 {
-	// log setup
+  // FIXME: set default indent to math program
+  // log setup
 	static u8 lastMallocTime = 0;
 	u8 currentMallocTime = dvmGetTotalProcessCpuTimeMsec();
 	static int numMallocs = -20; // keep track of mallocs so that after 20 files are flushed
@@ -220,7 +220,7 @@ static void *tryMalloc(size_t size)
 		ALOGD("Robust log trymalloc ProcessName %s", processName.c_str());
 		ALOGD("Robust log last %llu current %llu diff %llu", currentMallocTime, lastMallocTime, currentMallocTime - lastMallocTime);
 		
-		if (fileLog != NULL) {	
+		if (fileLog != NULL) { // FIXME, maybe add an assert
 			fprintf(fileLog, "@beginTryMalloc{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appStartTime-ms\":%llu,\"currAlloc-kB\":%d,\"currFootprint-kB\":%d,\"maxFootprint-kB\":%d,\"numAllocs\":%d,\"amtAlloc\":%f}\n", 
 					currentSequenceNumber, dvmGetRTCTimeMsec(), currentMallocTime,
 					alloc , footprint, maxFootprint, numAllocs, (float)(amountAlloc / 1024.0));
@@ -235,7 +235,7 @@ static void *tryMalloc(size_t size)
 	// if default policy is not in effect use
 	// custom algo
 	// else leave at default
-	if (!name.compare(0,6,"default"))
+	if (!name.compare(0,6,"default")) // FIXME: use integers
 	{
 		return rbMalloc(size, currentSequenceNumber);
 	}
@@ -248,7 +248,7 @@ static void *tryMalloc(size_t size)
         ALOGW("%zd byte allocation exceeds the %zd byte maximum heap size",
              size, gDvm.heapGrowthLimit);
         ptr = NULL;
-
+	    // FIXME: change name to tryMallocSequenceNumber duplicate log
 		// malloc failed (indirectly) so log it if necessary
 		if (!currentSequenceNumber) {
 			currentSequenceNumber = seqNumber++;
@@ -283,6 +283,7 @@ static void *tryMalloc(size_t size)
     }
 
 	// malloc failed so log it if we didn't already
+    // FIXME: pull into a single log method
 	if (!currentSequenceNumber) {
 		currentSequenceNumber = seqNumber++;
 		if (fileLog != NULL) {	
@@ -310,6 +311,7 @@ static void *tryMalloc(size_t size)
          */
 		int concSeqNumber = seqNumber++;
 		u8 currentConcTime = dvmGetRTCTimeMsec();
+		// FIXME: IDIOM  A && printf will only printf if A is true.
 
 		if (fileLog != NULL) {	
 			fprintf(fileLog, "@beginWaitConcurrentGc{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appStartTime-ms\":%llu}\n"
@@ -376,7 +378,7 @@ collect_soft_refs:
     LOGE_HEAP("Out of memory on a %zd-byte allocation.", size);
 //TODO: tell the HeapSource to dump its state
     dvmDumpThread(dvmThreadSelf(), false);
-	mallocDone(true, currentMallocTime, currentSequenceNumber);
+	mallocDone(true, currentMallocTime, currentSequenceNumber); // FIXME: rename log related with prefix log
     return NULL;
 }
 
@@ -879,7 +881,11 @@ bool dvmWaitForConcurrentGcToComplete()
  * Initializes the robust logfile
  * it appears this doesn't work at startup because startup occurs prior to forking
  */
-void initLogFile() 
+string processName;
+
+static int initLogDone = 0;
+
+  void _initLogFile()
 {
 	// Start Robust Modification
 
@@ -888,13 +894,14 @@ void initLogFile()
 	ifstream fd ("/proc/self/cmdline");
 	if (fd.is_open()) {
 		getline(fd, processName);
+		fd.close();
+		if (!processName.compare(0,6,"zygote") || !processName.compare("/system/bin/dexopt")) {
+		  ALOGD("Robust Log %s = zygote or dexopt skipping", processName.c_str());
+		  return;
+		}
 	}
-	fd.close();
 
-	if (!processName.compare(0,6,"zygote") || !processName.compare("/system/bin/dexopt")) {
-		ALOGD("Robust Log %s = zygote or dexopt skipping", processName.c_str());
-		return;
-	}
+	initLogDone = 1;
 	
 	ALOGD("Robust Log %s != zygote not skipping", processName.c_str());
 
@@ -902,34 +909,35 @@ void initLogFile()
      */
     clock_gettime(CLOCK_REALTIME, &start);
 
-	time_t mytime;
-	struct tm * timeinfo;	
-	char buffer[9];
-	mytime = time(NULL);
-
-	timeinfo = localtime(&mytime);
-	strftime(buffer,9,"%X",timeinfo);
-		
-	string currTime(buffer);
-	string baseDir = "/sdcard/robust/";
-	string slash = "/";
-
-	int polNumb;
-	string polFile = "/sdcard/robust/GCPolicy";
-	string polVal = "";
-	GcPolSpec policy;
-
-	fd.open (polFile.c_str());
-	if (fd.is_open()) {
-		getline(fd, polVal);
-	}
-	
+    time_t mytime;
+    struct tm * timeinfo;	
+    char buffer[9];
+    mytime = time(NULL);
+    
+    timeinfo = localtime(&mytime);
+    strftime(buffer,9,"%X",timeinfo);
+    
+    string currTime(buffer);
+    string baseDir = "/sdcard/robust/";
+    string slash = "/";
+    
+    int polNumb;
+    string polFile = "/sdcard/robust/GCPolicy";
+    string polVal = "";
+    GcPolSpec policy;
+    
+    fd.open (polFile.c_str());
+    if (fd.is_open()) {
+      getline(fd, polVal);
+      fd.close();
+    }
+    
 	
 	policy = policies[0];
 
 	if (polVal.length() > 0) {
 		polNumb = atoi(polVal.c_str());
-		if ((polNumb >= 0) && (polNumb < 5)) {
+		if ((polNumb >= 0) && (polNumb < 5)) { // FIXME default starts at 1
 			policy = policies[polNumb];
 		}
 	}
