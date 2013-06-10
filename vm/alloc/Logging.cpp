@@ -335,80 +335,65 @@ void setThreshold(void)
 void _initLogFile()
 {
     initLogDone = 0;
-    //ALOGD("Robust Log initializing log %d", initLogDone);
 
     /* Get process name
      */
     const char *processName = get_process_name();
-    //ALOGD("Robust Log processName size %d", sizeof(processName));
-    //FILE * fd = fopen ("/proc/self/cmdline", "rt");
-    //fclose(fd);
-    //return;
-    //if (fd != NULL) {
-    //    fscanf(fd, "%s", processName);
-    //    fclose(fd);
-        if (!strncmp(processName, "zygote",6) || !strncmp(processName, "dexopt", 6) 
-                || !strncmp(processName, "system_server", 6)) {
-            //ALOGD("Robust Log %s = zygote or dexopt skipping", processName);
-	        return;
-	    }
-    //}
+    
+    // if we're a blacklisted process
+    // skip logging
+    if (!strncmp(processName, "zygote",6) || !strncmp(processName, "dexopt", 6) 
+            || !strncmp(processName, "system_server", 6)) {
+        return;
+    }
 
     ALOGD("Robust Log %s != zygote not skipping", processName);
 
+    // we're a valid process so set
+    // initialization as complete
     initLogDone = 1;
-    ALOGD("Robust Log initializing complete %d", initLogDone);	
 
     /* Get start time so we can identify seperate runs
      */
     clock_gettime(CLOCK_REALTIME, &startTime);
-
     time_t mytime;
-    struct tm * timeinfo;	
-    char buffer[9];
     mytime = time(NULL);
-	
-    timeinfo = localtime(&mytime);
-    strftime(buffer,9,"%X",timeinfo);
-	
-    //string currTime(buffer);
-    char baseDir[] = "/sdcard/robust/";
-	
-    int polNumb;
+    char *timeStart = ctime(&mytime);	
+    removeNewLines(timeStart);	 
+
     char polFile[] = "/sdcard/robust/GCPolicy";
     char polVal[2];
     GcPolSpec policy;
 
-    //ifstream fdPol(polFile.c_str());
+    // check and see if we have GC policy
+    // file to read the policy from
     FILE *fdPol = fopen(polFile, "rt");
     ALOGD("Robust Log attempting to open Policy file %s", polFile);
-    //fdPol.open (polFile.c_str());
     if (fdPol != NULL) {
         ALOGD("Robust Log policy file open");
         fscanf(fdPol, "%s", polVal);
-        //fdPol.getline(polVal, 2);
         fclose(fdPol);
     }
-	
-    ALOGD("Robust Log polVal %s", polVal);
 	
     policy = policies[0];
 
     if (polVal[0]) {
-	    polNumb = atoi(polVal);
-        ALOGD("Robust Log policy Number %d", polNumb);
+	    int polNumb = atoi(polVal);
 	    if ((polNumb >= 0) && (polNumb < NUM_POLICIES)) {
 	      policy = policies[polNumb - 1];
 	    }
     }
 	
+    // set up the policy we'll be executing
+    // read the numbers from the list we have stored
+    // TODO: we'll get better granularity with the
+    // hires timer but overhead might be costly
     const char *policyName = policy.name;
     policyNumber = policy.policyNumber;
     minGCTime = policy.minTime;
     intervals = policy.intervals;
-    //freeHistory = (int*) malloc(sizeof(int) * intervals);
+    ALOGD("Robust Log policy Number %d", policyNumber);
 	
-    ALOGD("Robust Log Getting Granularity");
     // figure out actual timer granularity
     u8 startG = dvmGetTotalProcessCpuTimeNsec();
     u8 end = startG;
@@ -422,28 +407,25 @@ void _initLogFile()
     u8 diff2=end-startG;
 
     ALOGD("Robust Log Granularity is %llu", diff2);
-    char *timeStart = ctime(&mytime);
-    //ALOGD("Robust Log Removing Newlines");	
-    removeNewLines(timeStart);	 
-    //string fileName = baseDir + processName;
+
+    char baseDir[] = "/sdcard/robust/";
     char fileName[128];
-    //ALOGD("Robust Log Copying");
     strcpy(fileName, baseDir);
-   // ALOGD("Robust Log concatenating");
     strcat(fileName, processName);
 
-  ALOGD("Robust Log ||%s||", fileName);
-  fileLog = fopen(fileName, "at" );
-  if (fileLog != NULL) {		
-	fprintf(fileLog, "\n\n@header{\"device\":maguro,\"process\":\"%s\",\"policy\":\"%s\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n", 
-			processName, policyName,dvmGetRTCTimeMsec(), timeStart,diff2);
-  }
-  else {
-	ALOGD("Robust Log fail open %s %s", processName,strerror(errno));
-	logReady = false;
-	return;
-  }
-		
+    ALOGD("Robust Log ||%s||", fileName);
+    fileLog = fopen(fileName, "at" );
+    if (fileLog != NULL) {		
+        fprintf(fileLog, "\n\n@header{\"device\":maguro,\"process\":\"%s\",\"policy\":\"%s\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n", 
+            processName, policyName,dvmGetRTCTimeMsec(), timeStart,diff2);
+    }
+    else {
+        ALOGD("Robust Log fail open %s %s", processName,strerror(errno));
+        logReady = false;
+        return;
+    }
+	
+    // set initial values	
     logReady = true;
     seqNumber = 1;
     threshold = (128 << 10);
