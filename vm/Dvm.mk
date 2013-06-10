@@ -110,7 +110,8 @@ LOCAL_SRC_FILES := \
 	Sync.cpp \
 	Thread.cpp \
 	UtfString.cpp \
-	alloc/Alloc.cpp \
+    alloc/Logging.cpp \
+    alloc/Alloc.cpp \
 	alloc/CardTable.cpp \
 	alloc/HeapBitmap.cpp.arm \
 	alloc/HeapDebug.cpp \

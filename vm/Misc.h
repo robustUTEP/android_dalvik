@@ -258,7 +258,6 @@ INLINE u8 dvmGetThreadCpuTimeMsec(void) {
 
 // Start Robust modification
 //Jahid: added methods to get process CPU time.
-
 /*
  * Get the current per-process CPU time.
  */

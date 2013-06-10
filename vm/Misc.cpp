@@ -475,6 +475,7 @@ u8 dvmGetThreadCpuTimeNsec()
 // Start Robust modification
 
 //Jahid: added methods to get process cpu time.
+
 /*
  * Get the per-process CPU time, in nanoseconds
  *

@@ -30,7 +30,7 @@
 #include <sys/resource.h>
 #include <limits.h>
 #include <errno.h>
-#include "Robust.h"
+#include "alloc/Logging.h"
 
 #ifdef LOG_NDDEBUG
 #undef LOG_NDDEBUG
@@ -184,84 +184,28 @@ static void gcForMalloc(bool clearSoftReferences)
  */
 static void *tryMalloc(size_t size)
 {
-  // FIXME: set default indent to math program
-  // log setup
-	static u8 lastMallocTime = 0;
-	u8 currentMallocTime = dvmGetTotalProcessCpuTimeMsec();
-	static int numMallocs = -20; // keep track of mallocs so that after 20 files are flushed
-	int currentSequenceNumber = 0;
-
-	// This is the first place where we may try to log so
-	// we have to initialize the log file here if not 
-	// done so
-	if (!logReady) {
-		initLogFile();
-	}
-
-	// add in current mallocs
-	numAllocs++;
-	amountAlloc += size;	
-
-	// flush log if limit reached
-	numMallocs++;
-	if (!numMallocs) {
-		fflush(fileLog);
-		numMallocs = -20;
-	}
-
-	// if last malloc was more than 100 ms ago 
-	// log this malloc
-	if (((currentMallocTime - lastMallocTime) > 100) && logReady) {
-		currentSequenceNumber = seqNumber++;
-		int alloc = (dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, NULL, 0) / 1024);
-		int footprint = (dvmHeapSourceGetValue(HS_FOOTPRINT, NULL, 0) / 1024);
-		int maxFootprint = dvmHeapSourceGetValue(HS_ALLOWED_FOOTPRINT, NULL, 0) / 1024;
-			
-		ALOGD("Robust log trymalloc ProcessName %s", processName.c_str());
-		ALOGD("Robust log last %llu current %llu diff %llu", currentMallocTime, lastMallocTime, currentMallocTime - lastMallocTime);
-		
-		if (fileLog != NULL) { // FIXME, maybe add an assert
-			fprintf(fileLog, "@beginTryMalloc{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appStartTime-ms\":%llu,\"currAlloc-kB\":%d,\"currFootprint-kB\":%d,\"maxFootprint-kB\":%d,\"numAllocs\":%d,\"amtAlloc\":%f}\n", 
-					currentSequenceNumber, dvmGetRTCTimeMsec(), currentMallocTime,
-					alloc , footprint, maxFootprint, numAllocs, (float)(amountAlloc / 1024.0));
-		}
-		lastMallocTime = currentMallocTime;
-	
-	}
-	// orig start
-
+    // FIXME: set default indent to math program
+    // orig start
+    //logMallocStart(size, false);
+    logPrint(LOG_TRY_MALLOC, false);
+    //logMeInit();
+    //ALOGD("Robust log safe return from init");
+    
+    // log history
+    if (policyNumber == 3)  {
+        saveHistory();
+    }
+    
     void *ptr;
-
-	// if default policy is not in effect use
-	// custom algo
-	// else leave at default
-	if (!name.compare(0,6,"default")) // FIXME: use integers
-	{
-		return rbMalloc(size, currentSequenceNumber);
-	}
 
     /* Don't try too hard if there's no way the allocation is
      * going to succeed.  We have to collect SoftReferences before
      * throwing an OOME, though.
      */
-    if (size >= gDvm.heapGrowthLimit) {
+    if ((policyNumber == 1) && (size >= gDvm.heapGrowthLimit)) {
         ALOGW("%zd byte allocation exceeds the %zd byte maximum heap size",
              size, gDvm.heapGrowthLimit);
         ptr = NULL;
-	    // FIXME: change name to tryMallocSequenceNumber duplicate log
-		// malloc failed (indirectly) so log it if necessary
-		if (!currentSequenceNumber) {
-			currentSequenceNumber = seqNumber++;
-			if (fileLog != NULL) {	
-				int alloc = (dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, NULL, 0) / 1024);
-				int footprint = (dvmHeapSourceGetValue(HS_FOOTPRINT, NULL, 0) / 1024);
-				int maxFootprint = dvmHeapSourceGetValue(HS_ALLOWED_FOOTPRINT, NULL, 0) / 1024;
-				fprintf(fileLog, "@beginTryMalloc{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appStartTime-ms\":%llu,\"currAlloc-kB\":%d,\"currFootprint-kB\":%d,\"maxFootprint-kB\":%d,\"numAllocs\":%d,\"amtAlloc\":%f}\n", 
-						currentSequenceNumber, dvmGetRTCTimeMsec(), currentMallocTime,
-						alloc, footprint, maxFootprint, numAllocs, (amountAlloc / 1024.0));
-			}
-			lastMallocTime = currentMallocTime;
-		}
 
         goto collect_soft_refs;
     }
@@ -278,26 +222,41 @@ static void *tryMalloc(size_t size)
 
     ptr = dvmHeapSourceAlloc(size);
     if (ptr != NULL) {
-		mallocDone(false, currentMallocTime, currentSequenceNumber);
+        //logMallocDone();		// FIXME use single function with
+				// enumerate for begin/end of log
+        logPrint(LOG_TRY_MALLOC, false);
         return ptr;
     }
 
 	// malloc failed so log it if we didn't already
-    // FIXME: pull into a single log method
-	if (!currentSequenceNumber) {
-		currentSequenceNumber = seqNumber++;
-		if (fileLog != NULL) {	
-			int alloc = (dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, NULL, 0) / 1024);
-			int footprint = (dvmHeapSourceGetValue(HS_FOOTPRINT, NULL, 0) / 1024);
-			int maxFootprint = dvmHeapSourceGetValue(HS_ALLOWED_FOOTPRINT, NULL, 0) / 1024;
-			fprintf(fileLog, "@beginTryMalloc{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appStartTime-ms\":%llu,\"currAlloc-kB\":%d,\"currFootprint-kB\":%d,\"maxFootprint-kB\":%d,\"numAllocs\":%d,\"amtAlloc\":%f}\n", 
-					currentSequenceNumber, dvmGetRTCTimeMsec(), currentMallocTime,
-					alloc, footprint, maxFootprint, numAllocs, (amountAlloc / 1024.0));
-		}
-		lastMallocTime = currentMallocTime;
-		numAllocs = 0;	
-		amountAlloc = 0;
-	}
+    //logMallocStart(size, true);
+    logPrint(LOG_TRY_MALLOC, true);
+
+    // if we're running MI policy then
+    // check if heap should grow instead
+    // of running gcs
+    if (policyNumber != 1) {
+        
+        // if we're running MI2a set the threshold
+        if (policyNumber == 3) {
+            setThreshold();
+        }
+        ptr = dvmHeapSourceAllocAndGrow(size);
+        if (ptr != NULL) {
+
+            dvmHeapSourceGetIdealFootprint();
+            //logMallocDone();
+            logPrint(LOG_TRY_MALLOC, true);
+        }
+
+        // if it's been less than the min GC time
+        // return, otherwise run a GC
+        u8 elapsedSinceGC = dvmGetTotalProcessCpuTimeMsec() - lastGCTime;
+        if ((elapsedSinceGC < minGCTime) && (ptr != NULL)) {
+            return ptr;
+        }
+    }
+        
 
 
     /*
@@ -309,23 +268,12 @@ static void *tryMalloc(size_t size)
          * The GC is concurrently tracing the heap.  Release the heap
          * lock, wait for the GC to complete, and retrying allocating.
          */
-		int concSeqNumber = seqNumber++;
-		u8 currentConcTime = dvmGetRTCTimeMsec();
-		// FIXME: IDIOM  A && printf will only printf if A is true.
-
-		if (fileLog != NULL) {	
-			fprintf(fileLog, "@beginWaitConcurrentGc{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appStartTime-ms\":%llu}\n"
-					, concSeqNumber, dvmGetRTCTimeMsec(), dvmGetTotalProcessCpuTimeMsec());
-		}
-
+        
+        logPrint(LOG_WAIT_CONC_GC);
         dvmWaitForConcurrentGcToComplete();
+        logPrint(LOG_WAIT_CONC_GC);
 
-		if (fileLog != NULL) {	
-			u8 end = dvmGetTotalProcessCpuTimeMsec();
-			u8 WcEnd = dvmGetRTCTimeMsec();
-			fprintf(fileLog, "@endWaitConcurrentGc{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appEndTime-ms\":%llu,\"timeBlocked-ms\":%llu}\n"
-					, concSeqNumber, WcEnd, end, WcEnd - currentConcTime);
-		}
+        
     } else {
       /*
        * Try a foreground GC since a concurrent GC is not currently running.
@@ -335,7 +283,8 @@ static void *tryMalloc(size_t size)
 
     ptr = dvmHeapSourceAlloc(size);
     if (ptr != NULL) {
-		mallocDone(true, currentMallocTime, currentSequenceNumber);
+		//logMallocDone();
+        logPrint(LOG_TRY_MALLOC, true);
         return ptr;
     }
 
@@ -353,7 +302,8 @@ static void *tryMalloc(size_t size)
         LOGI_HEAP("Grow heap (frag case) to "
                 "%zu.%03zuMB for %zu-byte allocation",
                 FRACTIONAL_MB(newHeapSize), size);
-		mallocDone(true, currentMallocTime, currentSequenceNumber);
+		//logMallocDone();
+        logPrint(LOG_TRY_MALLOC, true);
         return ptr;
     }
 
@@ -370,7 +320,8 @@ collect_soft_refs:
     gcForMalloc(true);
     ptr = dvmHeapSourceAllocAndGrow(size);
     if (ptr != NULL) {
-		mallocDone(true, currentMallocTime, currentSequenceNumber);
+		//logMallocDone();
+        logPrint(LOG_TRY_MALLOC, true);
         return ptr;
     }
 //TODO: maybe wait for finalizers and try one last time
@@ -378,7 +329,8 @@ collect_soft_refs:
     LOGE_HEAP("Out of memory on a %zd-byte allocation.", size);
 //TODO: tell the HeapSource to dump its state
     dvmDumpThread(dvmThreadSelf(), false);
-	mallocDone(true, currentMallocTime, currentSequenceNumber); // FIXME: rename log related with prefix log
+	//logMallocDone();
+    logPrint(LOG_TRY_MALLOC, true);
     return NULL;
 }
 
@@ -574,21 +526,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     size_t percentFree;
     int oldThreadPriority = INT_MAX;
 
-	int currentSequenceNumber = seqNumber++;
-	u8 ClockTimeStart, ClockTimeEnd;
-	ClockTimeStart = dvmGetRTCTimeMsec(); 
-
-	// if the log's ready to go write details	
-	if (fileLog != NULL) {	
-		size_t heapsAlloc[2], heapsFootprint[2];
-		heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = 0;
-	
-		dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, heapsAlloc, 2);
-		dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
-		fprintf(fileLog, "@beginGC{\"seqNum\":%d,\"wcTime-ms\":%llu,\"GCType\":\"%s\",\"appStartTime-ms\":%llu,\"currAlloc0-kB\":%d,\"currFootprint0-kB\":%d,\"currAlloc1-kB\":%d,\"currFootprint1-kB\":%d}\n"
-				, currentSequenceNumber, ClockTimeStart, spec->reason, dvmGetTotalProcessCpuTimeMsec(),
-				heapsAlloc[0] / 1024,  heapsFootprint[0] / 1024, heapsAlloc[1] / 1024, heapsFootprint[1] / 1024);
-	}
+    logPrint(LOG_GC, spec);
 
     /* The heap lock must be held.
      */
@@ -818,25 +756,13 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
         dvmDdmSendHeapSegments(false, true);
     }
 		
+    // update last GC Time
+    lastGCTime = dvmGetTotalProcessCpuTimeMsec();
+    
 	/* Write GC info to log if the log's ready
      */
-
-	if (fileLog != NULL) {	
-
-		u4 gcTime = gcEnd - rootStart;
-		ClockTimeEnd = dvmGetRTCTimeMsec(); 
-		u8 TimeSpan = ClockTimeEnd - ClockTimeStart;
-		size_t heapsAlloc[2], heapsFootprint[2];
-		heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = 0;
-		
-		// get heapstats
-		dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, heapsAlloc, 2);
-		dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
-
-		fprintf(fileLog, "@endGC{\"seqNum\":%d,\"wcTime-ms\":%llu,\"totalTime-ms\":%llu,\"GCType\":\"%s\",\"appEndTime-ms\":%llu,\"currAlloc0-kB\":%d,\"currFootprint0-kB\":%d,\"currAlloc1-kB\":%d,\"currFootprint1-kB\":%d,\"GCPause-ms\":%u}\n"
-				, currentSequenceNumber, ClockTimeEnd, TimeSpan, spec->reason, dvmGetTotalProcessCpuTimeMsec(),
-				heapsAlloc[0] / 1024,  heapsFootprint[0] / 1024, heapsAlloc[1] / 1024, heapsFootprint[1] / 1024, gcTime);
-	}
+    logPrint(LOG_GC, spec);
+    
 }
 
 /*
@@ -876,285 +802,3 @@ bool dvmWaitForConcurrentGcToComplete()
     }
     return waited;
 }
-
-/* 
- * Initializes the robust logfile
- * it appears this doesn't work at startup because startup occurs prior to forking
- */
-string processName;
-
-static int initLogDone = 0;
-
-  void _initLogFile()
-{
-	// Start Robust Modification
-
-    /* Get process name
-     */
-	ifstream fd ("/proc/self/cmdline");
-	if (fd.is_open()) {
-		getline(fd, processName);
-		fd.close();
-		if (!processName.compare(0,6,"zygote") || !processName.compare("/system/bin/dexopt")) {
-		  ALOGD("Robust Log %s = zygote or dexopt skipping", processName.c_str());
-		  return;
-		}
-	}
-
-	initLogDone = 1;
-	
-	ALOGD("Robust Log %s != zygote not skipping", processName.c_str());
-
-    /* Get start time so we can identify seperate runs
-     */
-    clock_gettime(CLOCK_REALTIME, &start);
-
-    time_t mytime;
-    struct tm * timeinfo;	
-    char buffer[9];
-    mytime = time(NULL);
-    
-    timeinfo = localtime(&mytime);
-    strftime(buffer,9,"%X",timeinfo);
-    
-    string currTime(buffer);
-    string baseDir = "/sdcard/robust/";
-    string slash = "/";
-    
-    int polNumb;
-    string polFile = "/sdcard/robust/GCPolicy";
-    string polVal = "";
-    GcPolSpec policy;
-    
-    fd.open (polFile.c_str());
-    if (fd.is_open()) {
-      getline(fd, polVal);
-      fd.close();
-    }
-    
-	
-	policy = policies[0];
-
-	if (polVal.length() > 0) {
-		polNumb = atoi(polVal.c_str());
-		if ((polNumb >= 0) && (polNumb < 5)) { // FIXME default starts at 1
-			policy = policies[polNumb];
-		}
-	}
-	
-	name = policy.name;
-	minTime = policy.minTime;
-	intervals = policy.intervals;
-	freeHistory = (int*) malloc(sizeof(int) * intervals);
-
-	
-	/*
-	mode_t process_mask = umask(0);
-	mkdir((baseDir + processName).c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
-	umask(process_mask);
-	*/
-	
-	// figure out actual timer resolution
-	u8 start = dvmGetTotalProcessCpuTimeNsec();
-	u8 end = start;
-	while(true)
-	{
-		end=dvmGetTotalProcessCpuTimeNsec();
-		if(end!=start) {
-			break;
-		}
-	}
-	u8 diff2=end-start;
-
-	string timeStart(ctime(&mytime));
-	// erase any stray newline characters
-	std::string::size_type i = 0;
-	while (i < timeStart.length()) {
-		i = timeStart.find('\n', i);
-		if (i == std::string::npos) {
-		    break;
-		}
-		timeStart.erase(i);
-	}
-		
-	string appDir = baseDir + processName + slash;
-	
-	string fileName = appDir + currTime;
-
-		ALOGD("Robust Log ||%s||%s||", fileName.c_str(), appDir.c_str());
-		fileLog = fopen(fileName.c_str(), "at" );
-    	if (fileLog != NULL) {
-			numAllocs = 0;
-			amountAlloc = 0;		
-			fprintf(fileLog, "\n\n@header{\"device\":maguro,\"process\":\"%s\",\"policy\":\"%s\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n", 
-				processName.c_str(), name.c_str(),dvmGetRTCTimeMsec(), timeStart.c_str(),diff2);
-		}
-		else
-		{
-			ALOGD("Robust Log log fail open");
-		}
-		logReady = true;
-
-	
-	logReady = true;
-	seqNumber = 1;
-	threshold = (128 << 10);
-}
-
-/*
- * Print log and schedule GC if necessary/possible
- */
-
-void mallocDone(bool mallocFailed,u8 currentMallocTime,	int currentSequenceNumber)
-{
-		u8 end = dvmGetTotalProcessCpuTimeMsec();
-
-		if ((fileLog != NULL)  && currentSequenceNumber)  {	
-			u8 WcEnd = dvmGetRTCTimeMsec();
-
-			fprintf(fileLog, "@endTryMalloc{\"seqNum\":%d,\"wcTime-ms\":%llu,\"totalTime-ms\":%llu,\"appEndTime-ms\":%llu}\n"
-				, currentSequenceNumber, WcEnd, (end - currentMallocTime), end);		
-		}
-		
-		if (!name.compare(0,6,"default")) {				
-
-			// check and see if we're at the min time from a concurrent GC
-			if ((end - lastGCTime) > minTime)  {
-				// if we've hit the threshold schedule a concurrent GC
-				int alloc = (dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, NULL, 0) / 1024);
-				int footprint = (dvmHeapSourceGetValue(HS_FOOTPRINT, NULL, 0) / 1024);
-				if (threshold >= (footprint - alloc)) {
-					dvmInitConcGC();
-					lastGCTime = dvmGetTotalProcessCpuTimeMsec();
-				}
-			}
-		}
-}
-
-/*
- * Custom GC policy for Mi2 mi4 etc
- */
-void *rbMalloc(size_t size, int currentSequenceNumber)
-{
-	void *ptr;
-
-	// log setup
-	u8 currentMallocTime = dvmGetTotalProcessCpuTimeMsec();
-	static int currInterval = 0; // current interval
-	static bool threshSet = false; // if threshold has been set
-
-	// get sizes
-	int alloc = (dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, NULL, 0) / 1024);
-	int footprint = (dvmHeapSourceGetValue(HS_FOOTPRINT, NULL, 0) / 1024);
-	
-	// log histogram if the threshold hasn't been set
-	if (!threshSet) {
-		freeHistory[currInterval] = footprint - alloc;
-		currInterval = (currInterval + 1) % intervals;
-	} 
-
-    ptr = dvmHeapSourceAlloc(size);
-    if (ptr != NULL) {
-		mallocDone(false, currentMallocTime, currentSequenceNumber);
-        return ptr;
-    }
-
-	// malloc failed so log it if we didn't already
-	if (!currentSequenceNumber) {
-		currentSequenceNumber = seqNumber++;
-		if (fileLog != NULL) {	
-			int maxFootprint = dvmHeapSourceGetValue(HS_ALLOWED_FOOTPRINT, NULL, 0) / 1024;
-			fprintf(fileLog, "@beginTryMalloc{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appStartTime-ms\":%llu,\"currAlloc-kB\":%d,\"currFootprint-kB\":%d,\"maxFootprint-kB\":%d,\"numAllocs\":%d,\"amtAlloc\":%f}\n", 
-					currentSequenceNumber, dvmGetRTCTimeMsec(), currentMallocTime,
-					alloc, footprint, maxFootprint, numAllocs, (amountAlloc / 1024.0));
-		}
-		//lastMallocTime = currentMallocTime;	
-	}
-
-	// allocation has failed
-
-	// so we need to set the threshold 
-	// if it hasn't been set
-	if (!threshSet) {
-		threshold = freeHistory[(currInterval + (intervals + 1)) % intervals];
-		threshSet = true;
-	}
-
-    /* 
-     * grow heap on failure
-     */
-    ptr = dvmHeapSourceAllocAndGrow(size);
-    if (ptr != NULL) {
-        size_t newHeapSize;
-
-        newHeapSize = dvmHeapSourceGetIdealFootprint();
-//TODO: may want to grow a little bit more so that the amount of free
-//      space is equal to the old free space + the utilization slop for
-//      the new allocation.
-        LOGI_HEAP("Grow heap (frag case) to "
-                "%zu.%03zuMB for %zu-byte allocation",
-                FRACTIONAL_MB(newHeapSize), size);
-		mallocDone(true, currentMallocTime, currentSequenceNumber);
-        return ptr;
-    }
-
-	/*
-     * The allocation failed. Run a foreground GC
-     */
-    if (gDvm.gcHeap->gcRunning) {
-        /*
-         * The GC is concurrently tracing the heap.  Release the heap
-         * lock, wait for the GC to complete, and retrying allocating.
-         */
-		int concSeqNumber = seqNumber++;
-		u8 currentConcTime = dvmGetRTCTimeMsec();
-
-		if (fileLog != NULL) {	
-			fprintf(fileLog, "@beginWaitConcurrentGc{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appStartTime-ms\":%llu}\n"
-					, concSeqNumber, dvmGetRTCTimeMsec(), dvmGetTotalProcessCpuTimeMsec());
-		}
-
-        dvmWaitForConcurrentGcToComplete();
-
-		if (fileLog != NULL) {	
-			u8 end = dvmGetTotalProcessCpuTimeMsec();
-			u8 WcEnd = dvmGetRTCTimeMsec();
-			fprintf(fileLog, "@endWaitConcurrentGc{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appEndTime-ms\":%llu,\"timeBlocked-ms\":%llu}\n"
-					, concSeqNumber, WcEnd, end, WcEnd - currentConcTime);
-		}
-    } else {
-      /*
-       * Try a foreground GC since a concurrent GC is not currently running.
-       */
-      gcForMalloc(false);
-    }
-	
-	// Last ditch effort to free space
-	// our new policy shouldn't have any effect on this
-	// as this should only occur if the heap's at max
-
-    /* Most allocations should have succeeded by now, so the heap
-     * is really full, really fragmented, or the requested size is
-     * really big.  Do another GC, collecting SoftReferences this
-     * time.  The VM spec requires that all SoftReferences have
-     * been collected and cleared before throwing an OOME.
-     */
-    LOGI_HEAP("Forcing collection of SoftReferences for %zu-byte allocation",
-            size);
-    gcForMalloc(true);
-    ptr = dvmHeapSourceAllocAndGrow(size);
-    if (ptr != NULL) {
-		mallocDone(true, currentMallocTime, currentSequenceNumber);
-        return ptr;
-    }
-//TODO: maybe wait for finalizers and try one last time
-
-    LOGE_HEAP("Out of memory on a %zd-byte allocation.", size);
-//TODO: tell the HeapSource to dump its state
-    dvmDumpThread(dvmThreadSelf(), false);
-	mallocDone(true, currentMallocTime, currentSequenceNumber);
-    return NULL;
-	
-}
-
-

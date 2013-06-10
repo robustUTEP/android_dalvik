@@ -202,5 +202,4 @@ size_t dvmHeapSourceGetMaximumSize(void);
  */
 
 void dvmInitConcGC(void);
-
 #endif  // DALVIK_HEAP_SOURCE_H_
