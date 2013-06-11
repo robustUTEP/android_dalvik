@@ -16,6 +16,7 @@
 /*
  * Garbage-collecting memory allocator.
  */
+//That would be our new Heap.c
 #include "Dalvik.h"
 #include "alloc/HeapBitmap.h"
 #include "alloc/Verify.h"
