@@ -30,7 +30,7 @@
 #include <sys/resource.h>
 #include <limits.h>
 #include <errno.h>
-#include "alloc/Logging.h"
+#include "alloc/Robust.h"
 
 #ifdef LOG_NDDEBUG
 #undef LOG_NDDEBUG

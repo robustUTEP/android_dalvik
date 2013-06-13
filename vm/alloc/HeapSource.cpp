@@ -831,7 +831,7 @@ void* dvmHeapSourceAlloc(size_t n)
          * We have exceeded the allocation threshold.  Wake up the
          * garbage collector.
          */
-        //dvmSignalCond(&gHs->gcThreadCond);
+        dvmSignalCond(&gHs->gcThreadCond);
     }
     return ptr;
 }
