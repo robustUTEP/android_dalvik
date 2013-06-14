@@ -30,7 +30,7 @@
 #include <sys/resource.h>
 #include <limits.h>
 #include <errno.h>
-#include "alloc/Robust.h"
+#include "alloc/Logging.h"
 
 #ifdef LOG_NDDEBUG
 #undef LOG_NDDEBUG
@@ -222,8 +222,6 @@ static void *tryMalloc(size_t size)
 
     ptr = dvmHeapSourceAlloc(size);
     if (ptr != NULL) {
-        //logMallocDone();		// FIXME use single function with
-				// enumerate for begin/end of log
         logPrint(LOG_TRY_MALLOC, false);
         return ptr;
     }
@@ -245,7 +243,6 @@ static void *tryMalloc(size_t size)
         if (ptr != NULL) {
 
             dvmHeapSourceGetIdealFootprint();
-            //logMallocDone();
             logPrint(LOG_TRY_MALLOC, true);
         }
 
@@ -527,6 +524,14 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     int oldThreadPriority = INT_MAX;
 
     logPrint(LOG_GC, spec);
+    // if GC is a concurrent GC return
+    // since this policy only runs stw
+    if (spec->isPartial && spec->isConcurrent) {
+        logPrint(LOG_GC, spec);
+        ALOGD("Concurrent GC skipped");
+        return;
+    }
+
 
     /* The heap lock must be held.
      */

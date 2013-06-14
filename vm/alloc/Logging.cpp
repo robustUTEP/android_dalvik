@@ -106,7 +106,10 @@ void logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
         return;
     }
 
-    assert (fileLog != NULL);
+    if (fileLog == NULL) {
+        ALOGD("GC Logging file closed after succesful open, assertion would have failed");
+        return;
+    }
 
     switch (logEventType)
     {
