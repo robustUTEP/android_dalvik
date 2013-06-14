@@ -253,6 +253,7 @@ INLINE u4 dvmGetRelativeTimeMsec(void) {
  * If the thread CPU clock is not available, this always returns (u8)-1.
  */
 u8 dvmGetThreadCpuTimeNsec(void);
+u8 dvmGetTotalProcessCpuTimeNsec(void);
 
 /*
  * Per-thread CPU time, in micros.

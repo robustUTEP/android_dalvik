@@ -19,6 +19,13 @@
 #ifndef _DALVIK_ALLOC_HEAP
 #define _DALVIK_ALLOC_HEAP
 
+//Helper method to get seconds, miliseconds
+u8 GetSec(u8 msec);
+u8 GetMSec(u8 msec);
+
+//Process name to for logging
+char processName[128];
+
 /*
  * Initialize the GC heap.
  *

@@ -78,6 +78,15 @@ struct DvmGlobals {
     unsigned int    heapSizeMax;
     unsigned int    stackSize;
 
+    //New Policy
+    //Process global for CPU time usage.
+    int countGC;
+    u8 lastGCTime;
+    size_t freeAfterLastGC;
+    bool bEnableLog;
+    enum { Default=0, MI2, MI4, MI2A} policy;
+
+
     bool        verboseGc;
     bool        verboseJni;
     bool        verboseClass;

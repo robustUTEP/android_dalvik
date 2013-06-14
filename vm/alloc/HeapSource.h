@@ -16,6 +16,7 @@
 #ifndef _DALVIK_HEAP_SOURCE
 #define _DALVIK_HEAP_SOURCE
 
+#include "Misc.h"
 #include "alloc/Heap.h"
 #include "alloc/HeapInternal.h" // for GcHeap
 
@@ -92,6 +93,21 @@ enum HeapSourceValueSpec {
 };
 size_t dvmHeapSourceGetValue(enum HeapSourceValueSpec spec,
                              size_t perHeapStats[], size_t arrayLen);
+//Helper function for new policy
+bool dvmCanRunSTWGC();
+bool dvmCanScheduleConcGC();
+bool dvmShouldScheduleConcGC();
+void dvmSetThresholdForConcGC();
+void dvmAdjustThresholdForConcGC(size_t threshold);
+size_t dvmGetThresholdForConcGC();
+void dvmSaveArrayOfFreeMem();
+size_t dvmGetCurrentFree();
+
+//CPU Time related helper functions
+u8 dvmHeapSourceGetThreadTCPUTimeMS();
+u8 dvmHeapSourceGetOtherThreadTCPUTimeMS(pthread_t thread);
+u8 dvmHeapSourceGetGCThreadTCPUTimeMS();
+u8 dvmHeapSourceGetTotalProcessCPUTimeMS();
 
 /*
  * Allocates <n> bytes of zeroed data.

@@ -294,6 +294,10 @@ void dvmReleaseTrackedAlloc(Object* obj, Thread* self)
  */
 void dvmCollectGarbage(bool collectSoftReferences)
 {
+    //Don't run STW when policy doesn't support
+    if (!dvmCanRunSTWGC())
+	return;
+
     dvmLockHeap();
     while (gDvm.gcHeap->gcRunning) {
         dvmWaitForConcurrentGcToComplete();

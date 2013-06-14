@@ -36,6 +36,7 @@
 #include <sys/resource.h>
 #include <limits.h>
 #include <errno.h>
+#include <stdio.h>
 
 static const char* GcReasonStr[] = {
     [GC_FOR_MALLOC] = "GC_FOR_MALLOC",
@@ -238,6 +239,20 @@ static void gcForMalloc(bool collectSoftReferences)
     dvmCollectGarbageInternal(collectSoftReferences, GC_FOR_MALLOC);
 }
 
+//New Policy 
+// MI2A Policy specific 
+static int canSetThreshold = 1;
+
+//New policy Data collection specific 
+//Allocation fail count between GC
+static int allocFailCount = 0;
+static int allocFailCountAfter2s = 0;
+//Growth due to fail between GC
+static size_t heapGrowthForFail = 0;
+static size_t heapGrowthForFailAfter2s = 0;
+static size_t lastRequestedSize = 0;
+static size_t freeDuringThreshold = 0;
+
 /* Try as hard as possible to allocate some memory.
  */
 static void *tryMalloc(size_t size)
@@ -255,6 +270,15 @@ static void *tryMalloc(size_t size)
         goto collect_soft_refs;
     }
 
+    //New Policy 
+    //MI2A Policy specific   
+    bool bMI2APolicy = (gDvm.policy == 3);
+    bool bDefaultPolicy = (gDvm.policy == 0);
+    if (bMI2APolicy)
+      dvmSaveArrayOfFreeMem();
+  
+    lastRequestedSize = size;
+
 //TODO: figure out better heuristics
 //    There will be a lot of churn if someone allocates a bunch of
 //    big objects in a row, and we hit the frag case each time.
@@ -266,11 +290,37 @@ static void *tryMalloc(size_t size)
 //      (or, at least, there are only 0-5 objects swept each time)
 
     ptr = dvmHeapSourceAlloc(size);
-    if (ptr != NULL) {
-        return ptr;
-    }
+    if (ptr != NULL) 
+      return ptr;
 
-    /*
+    //New Policy
+    //MI2A Policy specific 
+    //Set the threshold when allocation fails first time since last GC (MI2A)
+    if (bMI2APolicy && canSetThreshold){
+      dvmSetThresholdForConcGC();
+      freeDuringThreshold = dvmGetCurrentFree();
+      canSetThreshold = 0;
+    }
+    
+    //New Policy
+    //Data collection specific
+    allocFailCount++;
+    heapGrowthForFail += size;
+    if (!bDefaultPolicy && dvmCanScheduleConcGC()){
+      allocFailCountAfter2s++;
+      heapGrowthForFailAfter2s += size;
+    }
+      
+    //New Policy
+    if (!dvmCanRunSTWGC())
+      {
+	ptr = dvmHeapSourceAllocAndGrow(size);
+	if (ptr != NULL) { 
+	  return ptr;
+	} 
+      }
+
+   /*
      * The allocation failed.  If the GC is running, block until it
      * completes and retry.
      */
@@ -557,6 +607,32 @@ static void verifyRootsAndHeap(void)
     dvmVerifyBitmap(dvmHeapSourceGetLiveBits());
 }
 
+//New Policy helper functions
+static u8 startClockTime = 0;
+u8 GetSec(u8 msec){
+    if (msec == 0)
+        return 0;
+    
+    return (msec-startClockTime)/1000;
+}
+
+u8 GetMSec(u8 msec){
+    if (msec == 0)
+        return 0;
+
+    return (msec-startClockTime)%1000;
+}
+
+void resetVariables(){
+
+    canSetThreshold = 1;
+    allocFailCount = 0;
+    heapGrowthForFail = 0;
+    allocFailCountAfter2s = 0;
+    heapGrowthForFailAfter2s = 0;
+    freeDuringThreshold = 0;
+}
+
 /*
  * Initiate garbage collection.
  *
@@ -575,14 +651,33 @@ void dvmCollectGarbageInternal(bool clearSoftRefs, GcReason reason)
 {
     GcHeap *gcHeap = gDvm.gcHeap;
     u4 rootSuspend, rootSuspendTime, rootStart, rootEnd;
-    u4 dirtySuspend, dirtyStart, dirtyEnd;
-    u4 totalTime;
+    u4 dirtySuspend = 0, dirtyStart = 0, dirtyEnd = 0;
+    u4 totalTime, totalPauseTime;
     size_t numObjectsFreed, numBytesFreed;
     size_t currAllocated, currFootprint;
     size_t extAllocated, extLimit;
     size_t percentFree;
     GcMode gcMode;
     int oldThreadPriority = kInvalidPriority;
+
+    size_t HeapFootprintStats[2];
+    size_t HeapAllocStats[2];
+
+    u4 ClockTimeStart, ClockTimeEnd;
+    u8 GCThreadCPUTimeStart, GCThreadCPUTimeEnd;
+    
+    //Trace the wall clock time.
+    ClockTimeStart = dvmGetRelativeTimeMsec(); 
+    GCThreadCPUTimeStart = dvmHeapSourceGetThreadTCPUTimeMS();
+    u8 ProcessCPUTimeStart = dvmHeapSourceGetTotalProcessCPUTimeMS();
+     
+    if (startClockTime == 0){
+        startClockTime = ClockTimeStart;
+    }
+
+    //NewPolicy logging specific
+    size_t currentFreeBefore = dvmGetCurrentFree();
+    size_t threshold = dvmGetThresholdForConcGC();
 
     /* The heap lock must be held.
      */
@@ -591,8 +686,14 @@ void dvmCollectGarbageInternal(bool clearSoftRefs, GcReason reason)
         LOGW_HEAP("Attempted recursive GC\n");
         return;
     }
+    gDvm.countGC++;
 
-    gcMode = (reason == GC_FOR_MALLOC) ? GC_PARTIAL : GC_FULL;
+    // For MI2A policy and GC_CONCURRENT 1 out of 5 will be full
+    if ((gDvm.policy == 3) && (reason == GC_CONCURRENT))	
+        gcMode = (gDvm.countGC % 5 != 0) ? GC_PARTIAL : GC_FULL;
+    else
+        gcMode = (reason == GC_FOR_MALLOC) ? GC_PARTIAL : GC_FULL;
+
     gcHeap->gcRunning = true;
 
     rootSuspend = dvmGetRelativeTimeMsec();
@@ -809,7 +910,7 @@ void dvmCollectGarbageInternal(bool clearSoftRefs, GcReason reason)
 #endif
 
     LOGD_HEAP("Sweeping...");
-
+    u8 sweepStart = dvmHeapSourceGetThreadTCPUTimeMS();
     dvmHeapSweepSystemWeaks();
 
     /*
@@ -831,6 +932,8 @@ void dvmCollectGarbageInternal(bool clearSoftRefs, GcReason reason)
     }
     dvmHeapSweepUnmarkedObjects(gcMode, reason == GC_CONCURRENT,
                                 &numObjectsFreed, &numBytesFreed);
+    u8 sweepEnd = dvmHeapSourceGetThreadTCPUTimeMS();
+
     LOGD_HEAP("Cleaning up...");
     dvmHeapFinishMarkStep();
     if (reason == GC_CONCURRENT) {
@@ -849,9 +952,8 @@ void dvmCollectGarbageInternal(bool clearSoftRefs, GcReason reason)
         dvmHeapSourceGrowForUtilization();
     }
 
-    currAllocated = dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, NULL, 0);
-    currFootprint = dvmHeapSourceGetValue(HS_FOOTPRINT, NULL, 0);
-
+    currAllocated = dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, HeapAllocStats, 2);   currFootprint = dvmHeapSourceGetValue(HS_FOOTPRINT, HeapFootprintStats, 2);
+ 
 #if WITH_HPROF
     if (gcHeap->hprofContext != NULL) {
         hprofFinishHeapDump(gcHeap->hprofContext);
@@ -914,6 +1016,7 @@ void dvmCollectGarbageInternal(bool clearSoftRefs, GcReason reason)
         u4 markSweepTime = dirtyEnd - rootStart;
         bool isSmall = numBytesFreed > 0 && numBytesFreed < 1024;
         totalTime = rootSuspendTime + markSweepTime;
+	totalPauseTime =  markSweepTime;
         LOGD("%s freed %s%zdK, %d%% free %zdK/%zdK, external %zdK/%zdK, "
              "paused %ums",
              GcReasonStr[reason],
@@ -929,6 +1032,7 @@ void dvmCollectGarbageInternal(bool clearSoftRefs, GcReason reason)
         u4 dirtyTime = dirtyEnd - dirtyStart;
         bool isSmall = numBytesFreed > 0 && numBytesFreed < 1024;
         totalTime = rootSuspendTime + rootTime + dirtySuspendTime + dirtyTime;
+	totalPauseTime = rootSuspendTime + dirtySuspendTime;
         LOGD("%s freed %s%zdK, %d%% free %zdK/%zdK, external %zdK/%zdK, "
              "paused %ums+%ums",
              GcReasonStr[reason],
@@ -952,6 +1056,56 @@ void dvmCollectGarbageInternal(bool clearSoftRefs, GcReason reason)
         LOGD_HEAP("Dumping native heap to DDM\n");
         dvmDdmSendHeapSegments(false, true);
     }
+
+
+    //New Policy   
+    ClockTimeEnd = dvmGetRelativeTimeMsec(); 
+    gDvm.lastGCTime = ClockTimeEnd;
+    GCThreadCPUTimeEnd = dvmHeapSourceGetThreadTCPUTimeMS();
+    u8 ProcessCPUTimeEnd = dvmHeapSourceGetTotalProcessCPUTimeMS();
+    u8 GCThreadCPUTime = GCThreadCPUTimeEnd - GCThreadCPUTimeStart;
+    
+  
+    gDvm.freeAfterLastGC = dvmGetCurrentFree();
+    size_t currentFreeAfter = gDvm.freeAfterLastGC;
+    
+    if (gDvm.bEnableLog){
+	//Initialize process name
+	if(gDvm.countGC == 1){
+	    FILE* fd1 = fopen("/proc/self/cmdline", "rt");
+	    if (fd1 != NULL) {
+		//First line of the file is process name.
+		fscanf(fd1,"%s", processName);
+		fclose(fd1);
+	    } else 
+		LOGD("Could not read file: /proc/self/cmdline");
+	}
+
+	FILE* file = fopen("/sdcard/gcdata.txt", "at+");
+	if (!file)
+	    LOGD("Error: Could not open file.\n");  
+	
+	char* softReference = clearSoftRefs ? "Yes": "No"; 
+    
+	if (file){
+        
+	    if (reason != GC_CONCURRENT)
+		fprintf(file, "GC:\t%s\tTime Start-end:\t%lld.%.3llds\t%lld.%.3llds\tThread CPU:\t%lldms\tProcess CPU Start-end:\t%lldms\t%lldms\tPause time Start-end:\t%u.%.3us\t%u.%.3us\t%u.%.3us\t%u.%.3us\t%ums\tLast alloc request:\t%zuB\t%s\tAfter GC:Freed:\tnum objects:\t%zd\tBytes\t%zdKB\tHeap0:Cur alloc:\t%zdKB\tFootprint:\t%zdKB\tExt Alloc:\t%zdKB\tExt Footprint:\t%zdKB\tSoftReference collect:\t%s\tMax Heap limit: %zdKB\tGC count:\t%d\tPolicy:\t%d\tsweep time=%lldms\tcurrentFree,BeforeGC=%zdKB\tAfterGC=%zdKB\tFreeDuringThreshold=%zdKB\tThreshold=%zdKB\tFail count = %d\tGrowth due to failure = %zdKB\tFail count after 2s = %d\tGrowth due to failure after 2s = %zdKB\n",  processName, GetSec(ClockTimeStart), GetMSec(ClockTimeStart), GetSec(ClockTimeEnd), GetMSec(ClockTimeEnd),  GCThreadCPUTime, ProcessCPUTimeStart, ProcessCPUTimeEnd, (u4)GetSec(rootSuspend), (u4)GetMSec(rootSuspend), (u4)GetSec(rootStart), (u4)GetMSec(rootStart), (u4)GetSec(dirtySuspend), (u4)GetMSec(dirtySuspend), (u4)GetSec(dirtyStart), (u4)GetMSec(dirtyStart), totalPauseTime, lastRequestedSize, GcReasonStr[reason], numObjectsFreed, numBytesFreed/1024, HeapAllocStats[0]/1024, HeapFootprintStats[0]/1024, extAllocated/1024, extLimit/1024, softReference, gDvm.heapSizeMax/1024, gDvm.countGC, gDvm.policy, sweepEnd - sweepStart, currentFreeBefore/1024, currentFreeAfter/1024, freeDuringThreshold/1024, threshold/1024, allocFailCount, heapGrowthForFail/1024, allocFailCountAfter2s, heapGrowthForFailAfter2s/1024);
+
+	    else
+	
+		fprintf(file, "GC:\t%s\tTime Start-end:\t%lld.%.3llds\t%lld.%.3llds\tThread CPU:\t%lldms\tProcess CPU Start-end:\t%lldms\t%lldms\tPause time Start-end:\t%u.%.3us\t%u.%.3us\t%u.%.3us\t%u.%.3us\t%ums\tLast alloc request:\t%zuB\t%s\tAfter GC:Freed:\tnum objects:\t%zd\tBytes\t%zdKB\tHeap0:Cur alloc:\t%zdKB\tFootprint:\t%zdKB\tExt Alloc:\t%zdKB\tExt Footprint:\t%zdKB\tSoftReference collect:\t%s\tMax Heap Limit: %zdKB\tGC count:\t%d\tPolicy:\t%d\tsweep time = %lldms\tcurrentFree,BefoerGC=%zdKB\tAfterGC=%zdKB\tFreeDuringThreshold=%zdKB\tThreshold=%zdKB\tFail count = %d\tGrowth due to failure = %zdKB\tFail count after 2s = %d\tGrowth due to failure after 2s = %zdKB\n",  processName, GetSec(ClockTimeStart), GetMSec(ClockTimeStart), GetSec(ClockTimeEnd), GetMSec(ClockTimeEnd),  GCThreadCPUTime, ProcessCPUTimeStart, ProcessCPUTimeEnd, (u4)GetSec(rootSuspend), (u4)GetMSec(rootSuspend), (u4)GetSec(rootStart), (u4)GetMSec(rootStart), (u4)GetSec(dirtySuspend), (u4)GetMSec(dirtySuspend), (u4)GetSec(dirtyStart), (u4)GetMSec(dirtyStart), totalPauseTime, lastRequestedSize, GcReasonStr[reason], numObjectsFreed, numBytesFreed/1024, HeapAllocStats[0]/1024, HeapFootprintStats[0]/1024, extAllocated/1024, extLimit/1024, softReference, gDvm.heapSizeMax/1024, gDvm.countGC, gDvm.policy, sweepEnd-sweepStart, currentFreeBefore/1024, currentFreeAfter/1024, freeDuringThreshold/1024, threshold/1024, allocFailCount, heapGrowthForFail/1024, allocFailCountAfter2s, heapGrowthForFailAfter2s/1024);
+	  
+	    fflush(file);
+	    fclose(file);
+	}
+	else{
+	    LOGD("File error: %s", strerror(errno));
+	}
+    }
+
+    resetVariables();  
+
 }
 
 void dvmWaitForConcurrentGcToComplete(void)

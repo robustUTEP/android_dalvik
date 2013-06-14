@@ -29,6 +29,7 @@
 #include <ctype.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <string.h>
 
 #define kMinHeapStartSize   (1*1024*1024)
 #define kMinHeapSize        (2*1024*1024)
@@ -1405,6 +1406,12 @@ bool dvmInitAfterZygote(void)
     u8 startHeap, startQuit, startJdwp;
     u8 endHeap, endQuit, endJdwp;
 
+    //New Policy
+    gDvm.countGC = 0;
+    gDvm.lastGCTime = 0;
+    gDvm.freeAfterLastGC = (128 << 10); //set 128kb default
+    gDvm.bEnableLog = true;
+    gDvm.policy = MI2A;
     startHeap = dvmGetRelativeTimeUsec();
 
     /*

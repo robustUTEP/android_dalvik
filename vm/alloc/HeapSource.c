@@ -13,6 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <time.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <pthread.h>
 
 #include <cutils/mspace.h>
 #include <stdint.h>     // for SIZE_MAX
@@ -698,6 +702,25 @@ dvmHeapSourceGetValue(enum HeapSourceValueSpec spec, size_t perHeapStats[],
     return total;
 }
 
+u8 dvmHeapSourceGetThreadTCPUTimeMS(){
+    return (u8) dvmGetThreadCpuTimeUsec()/1000;
+}
+
+u8 dvmHeapSourceGetOtherThreadTCPUTimeMS(pthread_t thread){
+    return (u8)dvmGetOtherThreadCpuTimeUsec(thread)/1000;
+}
+
+u8 dvmHeapSourceGetGCThreadTCPUTimeMS(){
+    if (gHs->hasGcThread)
+	return (u8)dvmGetOtherThreadCpuTimeUsec(gHs->gcThread)/1000;
+    else 
+	return (u8)-1;
+}
+
+u8 dvmHeapSourceGetTotalProcessCPUTimeMS(){
+    return (u8)dvmGetTotalProcessCpuTimeNsec()/1000000;
+}
+
 static void aliasBitmap(HeapBitmap *dst, HeapBitmap *src,
                         uintptr_t base, uintptr_t max) {
     size_t offset;
@@ -807,6 +830,85 @@ void dvmMarkImmuneObjects(const char *immuneLimit)
     }
 }
 
+//New Policy -- code start
+static u8 minIntervalSTW = 0; // set later depending on the policy
+static u8 minIntervalConcGC = 0; // set later depending on the policy
+#define ARRAYSIZE 5
+static size_t arrayOfFreeMem[ARRAYSIZE];
+static int currentIndex = 0; //will track current free history array index
+static int thresholdIndex = -4; //Will points the .5s ago free memory
+static u8 lastSavedMallocTime = 0;
+static size_t thresholdForConcGC = CONCURRENT_START;
+
+bool dvmCanRunSTWGC(){
+    if (gDvm.policy == 1)
+	minIntervalSTW = 2000;
+    else if (gDvm.policy == 2)
+	minIntervalSTW = 4000;
+    else if (gDvm.policy == 3)
+	return false;
+    else if (gDvm.policy == 0)
+	return true;
+
+    return (bool)((dvmGetRelativeTimeMsec() - gDvm.lastGCTime) > minIntervalSTW);
+}
+
+bool dvmCanScheduleConcGC(){
+    if (gDvm.policy == 0)
+	return true;
+    else if (gDvm.policy == 2)
+	minIntervalConcGC = 4000;
+    else if (gDvm.policy == 1 || gDvm.policy == 3)
+	minIntervalConcGC = 2000;
+    
+    return ((dvmGetRelativeTimeMsec() - gDvm.lastGCTime) > minIntervalConcGC);
+}
+
+bool dvmShouldScheduleConcGC(){
+    return dvmGetCurrentFree() <= thresholdForConcGC;  
+}
+
+void dvmSetThresholdForConcGC(){
+    if (thresholdIndex >= 0){
+	if (dvmGetRelativeTimeMsec() - gDvm.lastGCTime > 500)
+	    thresholdForConcGC = arrayOfFreeMem[thresholdIndex];
+	else
+	    thresholdForConcGC = gDvm.freeAfterLastGC;
+    }
+    else
+	thresholdForConcGC = CONCURRENT_START;
+}
+
+size_t dvmGetThresholdForConcGC(){
+    return thresholdForConcGC;
+}
+
+void dvmSaveArrayOfFreeMem(){
+    if ((dvmGetRelativeTimeMsec() - lastSavedMallocTime) > 100)
+	{
+	    lastSavedMallocTime = dvmGetRelativeTimeMsec();
+	    arrayOfFreeMem[currentIndex] = dvmGetCurrentFree();
+      
+	    currentIndex++;
+	    thresholdIndex++;
+
+	    currentIndex %= ARRAYSIZE;
+	    if (thresholdIndex >= 0)
+		thresholdIndex %= ARRAYSIZE;
+	}
+}
+
+size_t dvmGetCurrentFree(){
+    HeapSource *hs = gHs;
+    HS_BOILERPLATE();
+    Heap *const heap = &hs->heaps[0];
+   
+    return (mspace_footprint(heap->msp) - heap->bytesAllocated);
+}
+
+//New Policy --- End
+
+
 /*
  * Allocates <n> bytes of zeroed data.
  */
@@ -819,7 +921,7 @@ dvmHeapSourceAlloc(size_t n)
 
     HS_BOILERPLATE();
     heap = hs2heap(hs);
-    if (heap->bytesAllocated + n > hs->softLimit) {
+    if ((gDvm.policy == 0) && (heap->bytesAllocated + n > hs->softLimit)) {
         /*
          * This allocation would push us over the soft limit; act as
          * if the heap is full.
@@ -830,6 +932,13 @@ dvmHeapSourceAlloc(size_t n)
     }
     ptr = mspace_calloc(heap->msp, 1, n);
     if (ptr == NULL) {
+	//New Policy
+	//For MI2A, schedule BG GC if concurrent GC is not running and concurrent GC schedule possible
+	if ((gDvm.policy == 3) && !gDvm.gcHeap->gcRunning 
+	    && dvmCanScheduleConcGC()){
+	    dvmSignalCond(&gHs->gcThreadCond);	 
+	}
+
         return NULL;
     }
     countAllocation(heap, ptr, true);
@@ -843,7 +952,8 @@ dvmHeapSourceAlloc(size_t n)
          */
         return ptr;
     }
-    if (heap->bytesAllocated > heap->concurrentStartBytes) {
+    //NewPolicy
+    if (dvmCanScheduleConcGC() && dvmShouldScheduleConcGC()) {
         /*
          * We have exceeded the allocation threshold.  Wake up the
          * garbage collector.
@@ -905,7 +1015,8 @@ dvmHeapSourceAllocAndGrow(size_t n)
     }
 
     oldIdealSize = hs->idealSize;
-    if (softLimited(hs)) {
+    //Soft limit applied only default policy
+    if ((gDvm.policy == 0) && softLimited(hs)) {
         /* We're soft-limited.  Try removing the soft limit to
          * see if we can allocate without actually growing.
          */
@@ -1725,11 +1836,14 @@ dvmTrackExternalAllocation(size_t n)
         goto out;
     }
 
+    //NewPolicy
+    bool bCanRunSTWGC = dvmCanRunSTWGC();
+
     /* Try "allocating" using the existing "free space".
      */
     HSTRACE("EXTERNAL alloc %zu (%zu < %zu)\n",
             n, hs->externalBytesAllocated, hs->externalLimit);
-    if (externalAlloc(hs, n, false)) {
+    if (externalAlloc(hs, n, !bCanRunSTWGC)) {
         ret = true;
         goto out;
     }
