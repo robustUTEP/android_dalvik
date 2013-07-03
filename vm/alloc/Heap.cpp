@@ -185,12 +185,11 @@ static void gcForMalloc(bool clearSoftReferences)
 static void *tryMalloc(size_t size)
 {
     // FIXME: set default indent to math program
-    // orig start
-    //logMallocStart(size, false);
     logPrint(LOG_TRY_MALLOC, false);
-    //logMeInit();
-    //ALOGD("Robust log safe return from init");
-    
+
+    // start a concurrent GC if needed
+    scheduleConcurrentGC();
+
     // log history
     if (policyNumber == 3)  {
         saveHistory();
@@ -222,6 +221,8 @@ static void *tryMalloc(size_t size)
 
     ptr = dvmHeapSourceAlloc(size);
     if (ptr != NULL) {
+        //logMallocDone();		// FIXME use single function with
+				// enumerate for begin/end of log
         logPrint(LOG_TRY_MALLOC, false);
         return ptr;
     }
@@ -243,15 +244,20 @@ static void *tryMalloc(size_t size)
         if (ptr != NULL) {
 
             dvmHeapSourceGetIdealFootprint();
-            logPrint(LOG_TRY_MALLOC, true);
         }
 
         // if it's been less than the min GC time
         // return, otherwise run a GC
         u8 elapsedSinceGC = dvmGetTotalProcessCpuTimeMsec() - lastGCTime;
-        if ((elapsedSinceGC < minGCTime) && (ptr != NULL)) {
+        if ((policyNumber == 3) && (ptr != NULL)) {
+            logPrint(LOG_TRY_MALLOC, true);
             return ptr;
         }
+        if ((elapsedSinceGC < minGCTime) && (ptr != NULL)) {
+            logPrint(LOG_TRY_MALLOC, true);
+            return ptr;
+        }
+        
     }
         
 
@@ -524,14 +530,6 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     int oldThreadPriority = INT_MAX;
 
     logPrint(LOG_GC, spec);
-    // if GC is a concurrent GC return
-    // since this policy only runs stw
-    if (spec->isPartial && spec->isConcurrent) {
-        logPrint(LOG_GC, spec);
-        ALOGD("Concurrent GC skipped");
-        return;
-    }
-
 
     /* The heap lock must be held.
      */

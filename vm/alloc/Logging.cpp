@@ -37,7 +37,7 @@ struct GcPolSpec {
 };
 
 static GcPolSpec stockPol = {
-  "STW Only",
+  "default",
   1,
   0,
   0
@@ -45,7 +45,7 @@ static GcPolSpec stockPol = {
 GcPolSpec *stock = &stockPol;
 
 static GcPolSpec GcPolMI2 = {
-  "MI2S",
+  "MI2",
   2,
   2000,
   0
@@ -83,24 +83,10 @@ GcPolSpec *MI4A = &GcPolMI4A;
 const GcPolSpec policies[5] = {stockPol, GcPolMI2, GcPolMI2A, GcPolMI4, GcPolMI4A};
 GcPolSpec policy;
 
-void logPrint(int logEventType, const GcSpec* spec)
+void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
 {
-    logPrint(logEventType, false, spec);
-}
-
-void logPrint(int logEventType, bool mallocFail)
-{
-    logPrint(logEventType, mallocFail, NULL);
-}
-
-void logPrint(int logEventType)
-{
-    logPrint(logEventType, false, NULL);
-}
-
-void logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
-{
-
+    if (skipLogging) return;
+    
     initLogFile();
     if(!logReady) {
         return;
@@ -121,6 +107,9 @@ void logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
                 break; 
         case LOG_WAIT_CONC_GC:
                 logConcGC();
+                break;
+        case LOG_GC_SCHED:
+                logGCSched();
                 break;
     }
 }
@@ -153,7 +142,8 @@ void logMalloc(bool mallocFail)
     string beginOrEnd;
 
     static u8 lastMallocTime = 0;
-    u8 currentMallocTime = dvmGetTotalProcessCpuTimeMsec();
+    //u8 currentMallocTime = dvmGetTotalProcessCpuTimeMsec();
+    static int numMallocs = 0;
 
     // to keep the compiler quiet
     logStart = logStart;
@@ -161,21 +151,32 @@ void logMalloc(bool mallocFail)
     if (logStart) {
         // if last malloc was more than 100 ms ago
         // or if last malloc was less than 100 ms ago and malloc failed
-        // log this malloc 
-        if (((currentMallocTime - lastMallocTime) > 100) || mallocFail) {
+        // log this malloc
+        if (mallocFail) {
             beginOrEnd = "begin";
             thisMallocSeqNumb = seqNumber++;
             logStart = false;
             writeLogEvent(LOG_TRY_MALLOC, beginOrEnd.c_str(), "TryMalloc", thisMallocSeqNumb, NULL);
-            lastMallocTime = currentMallocTime;
+            //lastMallocTime = currentMallocTime;
+            numMallocs = 0;
         }
+        
+        if (numMallocs > 2000) {
+            u8 currentMallocTime = dvmGetTotalProcessCpuTimeMsec();
+            if (currentMallocTime - lastMallocTime < 100) {
+                thisMallocSeqNumb = seqNumber++;
+                logStart = false;
+                writeLogEvent(LOG_TRY_MALLOC, beginOrEnd.c_str(), "TryMalloc", thisMallocSeqNumb, NULL);
+                lastMallocTime = currentMallocTime;
+            }
+            numMallocs = 0;
+        }
+        numMallocs++;
     }
     else {
         beginOrEnd = "end";
         logStart = true;
         writeLogEvent(LOG_TRY_MALLOC, beginOrEnd.c_str(), "TryMalloc", thisMallocSeqNumb, NULL);
-        // schedule GC if needed
-        scheduleConcurrentGC();
     }
     
 }
@@ -197,17 +198,30 @@ void logConcGC()
         logStart = true;
     }
 
-    writeLogEvent(LOG_WAIT_CONC_GC, beginOrEnd.c_str(), "TryMalloc", thisGcSeqNumb, NULL);
+    writeLogEvent(LOG_WAIT_CONC_GC, beginOrEnd.c_str(), "WaitConcGC", thisGcSeqNumb, NULL);
     
+}
+
+/*
+ * Logs the time when a GC has been sheduled
+ */
+void logGCSched(void)
+{
+    // all we need to log is time so no need to get complicated
+    writeLogEvent(LOG_GC_SCHED, "", "schedGC", seqNumber++, NULL);   
 }
 
 /*
  * builds a string of the basic log info
  */
-char* logBasicEvent(const char* beginEnd,const char* eventName, int seqNumber, char output[])
+char* buildBasicEvent(const char* beginEnd,const char* eventName, int seqNumber, char output[])
 {
     u8 wcTime = dvmGetRTCTimeMsec();
     u8 appTime = dvmGetTotalProcessCpuTimeMsec();
+
+    // not sure how reliable this next section is
+    //char cpuSpeed[] = "noData";
+    //logCPUSpeed(cpuSpeed);
 
     sprintf(output, "@%s%s{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appTime-ms\":%llu",
         beginEnd, eventName, seqNumber, wcTime, appTime);
@@ -217,11 +231,15 @@ char* logBasicEvent(const char* beginEnd,const char* eventName, int seqNumber, c
 /*
  * builds a string of log info with heap stats
  */
-void logHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, char output[])
+void buildHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, char output[])
 {
-    char partial[90];
+    char partial[MAX_STRING_LENGTH];
     size_t heapsAlloc[2], heapsFootprint[2], heapsMax[2];
+    float thresholdKb = threshold / 1024.0;
 	heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = heapsMax[0] = heapsMax[1] = 0;
+
+    char cpuSpeed[] = "noData  ";
+    //logCPUSpeed(cpuSpeed);
 
     dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, heapsAlloc, 2);
     dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
@@ -234,19 +252,19 @@ void logHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, cha
     heapsFootprint[1] = heapsFootprint[1] / 1024;
     heapsMax[1] = heapsMax[1] / 1024;
 
-    logBasicEvent(beginEnd, eventName, seqNumber, partial);
+    buildBasicEvent(beginEnd, eventName, seqNumber, partial);
 
-    sprintf(output, "%s,\"currAlloc0-kB\":%d,\"currFootprint0-kB\":%d,\"currMax0-kB\":%d,\"currAlloc1-kB\":%d,\"currFootprint1-kB\":%d,\"currMax1-kB\":%d",
-        partial, heapsAlloc[0], heapsFootprint[0], heapsMax[0], heapsAlloc[1], heapsFootprint[1], heapsMax[1]); 
+    sprintf(output, "%s,\"cpuSpeed-Hz\":%s,\"currAlloc0-kB\":%d,\"currFootprint0-kB\":%d,\"currMax0-kB\":%d,\"currAlloc1-kB\":%d,\"currFootprint1-kB\":%d,\"currMax1-kB\":%d,\"threshold-kB\":%f",
+        partial, cpuSpeed, heapsAlloc[0], heapsFootprint[0], heapsMax[0], heapsAlloc[1], heapsFootprint[1], heapsMax[1], thresholdKb); 
 }
 
 /*
  * builds a string of heap stats with a GC type
  */
-void logGCEvent(const char* beginEnd,const char* eventName, int seqNumber, const GcSpec *spec, char output[])
+void buildGCEvent(const char* beginEnd,const char* eventName, int seqNumber, const GcSpec *spec, char output[])
 {
-    char partial[200];
-    logHeapEvent(beginEnd, eventName, seqNumber, partial);
+    char partial[MAX_STRING_LENGTH];
+    buildHeapEvent(beginEnd, eventName, seqNumber, partial);
 
     sprintf(output, "%s,\"GCType\":\"%s\"", partial, spec->reason);
 }
@@ -254,9 +272,9 @@ void logGCEvent(const char* beginEnd,const char* eventName, int seqNumber, const
 /*
  * writes a log event to a file
  */
-void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, int seqNumber, const GcSpec *spec)
+void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, int seqNumber, const GcSpec *spec, bool mallocFail)
 {
-    char partialEntry[225];
+    char partialEntry[MAX_STRING_LENGTH];
     static int numLogEvents = 0;
 
     // to keep compiler quiet
@@ -271,13 +289,16 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
     switch (eventType)
     {
         case LOG_TRY_MALLOC:
-                logHeapEvent(beginEnd, eventName, seqNumber, partialEntry);
+                char temp[MAX_STRING_LENGTH];
+                buildHeapEvent(beginEnd, eventName, seqNumber, temp);
+                sprintf(partialEntry, "%s,\"mallocFail\":\"%d\"", temp, (int)mallocFail);
                 break;
         case LOG_GC:
-                logGCEvent(beginEnd, eventName, seqNumber, spec, partialEntry);
-                break; 
+                buildGCEvent(beginEnd, eventName, seqNumber, spec, partialEntry);
+                break;
+        case LOG_GC_SCHED:
         case LOG_WAIT_CONC_GC:
-                logBasicEvent(beginEnd, eventName, seqNumber, partialEntry);
+                buildBasicEvent(beginEnd, eventName, seqNumber, partialEntry);
                 break;
     }   
 
@@ -287,7 +308,7 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
 
 void scheduleConcurrentGC() 
 {
-  if (policyNumber != 0) {
+  if (policyNumber != 1) {
 	u8 timeSinceLastGC = dvmGetTotalProcessCpuTimeMsec() - lastGCTime;
 
 	// check and see if we're at the min time from a concurrent GC
@@ -301,6 +322,7 @@ void scheduleConcurrentGC()
 	  dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
 
 	  if (threshold >= (heapsFootprint[0] - heapsAlloc[0])) {
+        logPrint(LOG_GC_SCHED);
 		dvmInitConcGC();
 	  }
 	}
@@ -326,10 +348,9 @@ void saveHistory(){
 
 void setThreshold(void)
 {
-	if (!threshSet) {
-		threshold = freeHistory[(currInterval + (intervals + 1)) % intervals];
-		threshSet = true;
-	}
+    // originally was only set once now we set each time
+	threshold = freeHistory[(currInterval + (intervals + 1)) % intervals];
+	threshSet = true;
 }
     
 /* 
@@ -338,6 +359,7 @@ void setThreshold(void)
 void _initLogFile()
 {
     initLogDone = 0;
+    skipLogging = 0;
 
     /* Get process name
      */
@@ -371,9 +393,9 @@ void _initLogFile()
     // check and see if we have GC policy
     // file to read the policy from
     FILE *fdPol = fopen(polFile, "rt");
-    ALOGD("Robust Log attempting to open Policy file %s", polFile);
+    //ALOGD("Robust Log attempting to open Policy file %s", polFile);
     if (fdPol != NULL) {
-        ALOGD("Robust Log policy file open");
+        //ALOGD("Robust Log policy file open");
         fscanf(fdPol, "%s", polVal);
         fclose(fdPol);
     }
@@ -382,7 +404,15 @@ void _initLogFile()
 
     if (polVal[0]) {
 	    int polNumb = atoi(polVal);
-	    if ((polNumb >= 0) && (polNumb < NUM_POLICIES)) {
+	    ALOGD("Policy Number %d", polNumb);
+	    
+	    // check if logging should be skipped
+	    if (polNumb < 0) {
+	        skipLogging = 1;
+	        polNumb = polNumb * -1;
+	        ALOGD("Skipping GC/Malloc logging using policy %d skipLogging %d", polNumb, skipLogging);
+	    } 
+	    if ((polNumb > 0) && (polNumb < NUM_POLICIES)) {
 	      policy = policies[polNumb - 1];
 	    }
     }
@@ -391,7 +421,7 @@ void _initLogFile()
     // read the numbers from the list we have stored
     // TODO: we'll get better granularity with the
     // hires timer but overhead might be costly
-    const char *policyName = policy.name;
+    //const char *policyName = policy.name;
     policyNumber = policy.policyNumber;
     minGCTime = policy.minTime;
     intervals = policy.intervals;
@@ -409,18 +439,20 @@ void _initLogFile()
     } 
     u8 diff2=end-startG;
 
-    ALOGD("Robust Log Granularity is %llu", diff2);
+    //LOGD("Robust Log Granularity is %llu", diff2);
 
     char baseDir[] = "/sdcard/robust/";
     char fileName[128];
     strcpy(fileName, baseDir);
     strcat(fileName, processName);
 
-    ALOGD("Robust Log ||%s||", fileName);
+    //ALOGD("Robust Log ||%s||", fileName);
     fileLog = fopen(fileName, "at" );
-    if (fileLog != NULL) {		
-        fprintf(fileLog, "\n\n@header{\"device\":maguro,\"process\":\"%s\",\"policy\":\"%s\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n", 
-            processName, policyName,dvmGetRTCTimeMsec(), timeStart,diff2);
+    if (fileLog != NULL) {
+        // bump our buffer log size to 12k
+        setvbuf(fileLog, NULL, _IOFBF, 12287);
+        fprintf(fileLog, "\n\n@header{\"device\":\"maguro\",\"process\":\"%s\",\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n", 
+            processName, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
     }
     else {
         ALOGD("Robust Log fail open %s %s", processName,strerror(errno));
@@ -472,6 +504,24 @@ void logMeInit()
 {
     initLogFile();
 }
+
+void logCPUSpeed(char* speed)
+{
+    char cpuFileName[] = "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq";
+    FILE* cpuFile = fopen(cpuFileName, "rt" );
+
+    if (cpuFile && fscanf(cpuFile, "%s", speed)) {
+        fclose(cpuFile);
+    }
+    else {
+        speed[0] = '\0';
+        ALOGD("Robust Log Failed to open CPU speed file: %s",strerror(errno));
+    }
+    
+}
+    
+
+int skipLogging;
 int seqNumber;
 bool logReady;
 FILE* fileLog;
