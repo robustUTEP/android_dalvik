@@ -19,6 +19,7 @@
 
 int tryMallocSequenceNumber = 0;
 u8 currentMallocTime = 0;
+u8 rootScanTime = 0;
 int currInterval = 0;
 bool threshSet;
 struct timespec startTime;
@@ -86,7 +87,15 @@ GcPolSpec policy;
 
 void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
 {
-    if (skipLogging) return;
+    static int numEvents = 0;
+    if (skipLogging) {
+        numEvents++;
+        if (numEvents >= 500) {
+            scheduleConcurrentGC();
+            numEvents =0;
+        }
+        return;
+    }
     
     initLogFile();
     if(!logReady) {
@@ -117,20 +126,40 @@ void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
 
 void logGC(const GcSpec* spec)
 {
-    static bool logStart = true;
+    static int logStage = 0;
     static int thisGCSeqNumb;
     string beginOrEnd;
     
-
-    if (logStart) {
+    switch (logStage)
+    {
+        case 0:
+            beginOrEnd = "begin";
+            thisGCSeqNumb = seqNumber++;
+            logStage = 1;
+            break;
+        case 1:
+            logStage = 2;
+            rootScanTime = dvmGetTotalProcessCpuTimeMsec();
+            return;
+        default:
+            beginOrEnd = "end";
+            logStage = 0;
+    }
+    /*
+    if (logStage == 0) {
         beginOrEnd = "begin";
         thisGCSeqNumb = seqNumber++;
-        logStart = false;
+        logStage = 1;
     }
+    else if (logStage == 1) {
+        logStage = 2;
+        rootScanTime = dvmGetTotalProcessCpuTimeMsec();
+        return;
+    }        
     else {
         beginOrEnd = "end";
-        logStart = true;
-    }
+        logStage = 0;
+    }*/
 
     writeLogEvent(LOG_GC, beginOrEnd.c_str(), "GC", thisGCSeqNumb, spec);
     
@@ -174,8 +203,10 @@ void logMalloc(bool mallocFail)
                 logStart = false;
                 mallocsDone = maxMallocs * numChecks;
                 writeLogEvent(LOG_TRY_MALLOC, beginOrEnd.c_str(), "TryMalloc", thisMallocSeqNumb, NULL);
+                // schedule concurrent GC if needed
+                scheduleConcurrentGC();
                 lastMallocTime = currentMallocTime;
-                ALOGD("maxMallocs %d numChecks %d currentMallocTime %llu lastMallocTime %llu", maxMallocs, numChecks, currentMallocTime, lastMallocTime);
+                //ALOGD("maxMallocs %d numChecks %d currentMallocTime %llu lastMallocTime %llu", maxMallocs, numChecks, currentMallocTime, lastMallocTime);
                 maxMallocs = numChecks * maxMallocs / 10;
                 // under certain (rare) circumstances max can go very low
                 // this is to prevent that
@@ -201,7 +232,6 @@ void logConcGC()
     static bool logStart = true;
     static int thisGcSeqNumb;
     string beginOrEnd;
-    
 
     if (logStart) {
         beginOrEnd = "begin";
@@ -214,7 +244,6 @@ void logConcGC()
     }
 
     writeLogEvent(LOG_WAIT_CONC_GC, beginOrEnd.c_str(), "WaitConcGC", thisGcSeqNumb, NULL);
-    
 }
 
 /*
@@ -249,13 +278,14 @@ char* buildBasicEvent(const char* beginEnd,const char* eventName, int seqNumber,
 void buildHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, char output[])
 {
     char partial[MAX_STRING_LENGTH];
-    size_t heapsAlloc[2], heapsFootprint[2], heapsMax[2];
+    size_t heapsAlloc[2], heapsFootprint[2], heapsMax[2], numObjects[2];
     float thresholdKb = threshold / 1024.0;
 	heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = heapsMax[0] = heapsMax[1] = 0;
 
     dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, heapsAlloc, 2);
     dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
     dvmHeapSourceGetValue(HS_ALLOWED_FOOTPRINT, heapsMax, 2);
+    dvmHeapSourceGetValue(HS_OBJECTS_ALLOCATED, numObjects, 2);
 
     heapsAlloc[0] = heapsAlloc[0] / 1024;
     heapsFootprint[0] = heapsFootprint[0] / 1024;
@@ -266,8 +296,8 @@ void buildHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, c
 
     buildBasicEvent(beginEnd, eventName, seqNumber, partial);
 
-    sprintf(output, "%s,\"currAlloc0-kB\":%d,\"currFootprint0-kB\":%d,\"currMax0-kB\":%d,\"currAlloc1-kB\":%d,\"currFootprint1-kB\":%d,\"currMax1-kB\":%d,\"threshold-kB\":%f",
-        partial, heapsAlloc[0], heapsFootprint[0], heapsMax[0], heapsAlloc[1], heapsFootprint[1], heapsMax[1], thresholdKb); 
+    sprintf(output, "%s,\"currAlloc0-kB\":%d,\"currFootprint0-kB\":%d,\"currMax0-kB\":%d,\"numObjects0\":%d,\"currAlloc1-kB\":%d,\"currFootprint1-kB\":%d,\"currMax1-kB\":%d,\"numObjects1\":%d,\"threshold-kB\":%f",
+        partial, heapsAlloc[0], heapsFootprint[0], heapsMax[0], numObjects[0], heapsAlloc[1], heapsFootprint[1], heapsMax[1], numObjects[1], thresholdKb); 
 }
 
 /*
@@ -280,7 +310,7 @@ void buildGCEvent(const char* beginEnd,const char* eventName, int seqNumber, con
     char cpuSpeed[] = "noData   ";
     logCPUSpeed(cpuSpeed);
 
-    sprintf(output, "%s,\"GCType\":\"%s\",\"cpuSpeed-Hz\":\"%s\"", partial, spec->reason, cpuSpeed);
+    sprintf(output, "%s,\"GCType\":\"%s\",\"cpuSpeed-Hz\":\"%s\",\"rootScanTime\":%llu", partial, spec->reason, cpuSpeed, rootScanTime);
 }
 
 /*
@@ -326,7 +356,7 @@ void scheduleConcurrentGC()
 	u8 timeSinceLastGC = dvmGetTotalProcessCpuTimeMsec() - lastGCTime;
 
 	// check and see if we're at the min time from a concurrent GC
-	if ((timeSinceLastGC) > minGCTime)	{
+	if (timeSinceLastGC > minGCTime)	{
 	  // FIXME check heap 0 instead of whole heap set last GC time on GC completion
 	  // if we've hit the threshold schedule a concurrent GC
 	  size_t heapsAlloc[2], heapsFootprint[2];
@@ -335,8 +365,9 @@ void scheduleConcurrentGC()
 	  dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, heapsAlloc, 2);
 	  dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
 
-	  if (threshold >= (heapsFootprint[0] - heapsAlloc[0])) {
+	  if ((threshold >= (heapsFootprint[0] - heapsAlloc[0])) || schedGC) {
         logPrint(LOG_GC_SCHED);
+        schedGC = false;
         // to prevent succesive calls from succeding
         // if gc doesn't complete soon
         lastGCTime = dvmGetTotalProcessCpuTimeMsec();
@@ -352,7 +383,7 @@ void scheduleConcurrentGC()
 
 void saveHistory(){
 
-    if (!threshSet) {
+    //if (!threshSet) {
         size_t heapsAlloc[2], heapsFootprint[2];
         heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = 0;
 
@@ -360,7 +391,7 @@ void saveHistory(){
         dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
 		freeHistory[currInterval] = heapsFootprint[0] - heapsAlloc[0];
 		currInterval = (currInterval + 1) % intervals;
-	} 
+	//} 
 }
 
 void setThreshold(void)
@@ -403,7 +434,7 @@ void _initLogFile()
     char *timeStart = ctime(&mytime);	
     removeNewLines(timeStart);	 
 
-    char polFile[] = "/sdcard/robust/GCPolicy";
+    char polFile[] = "/sdcard/robust/GCPolicy.txt";
     char polVal[2];
     GcPolSpec policy;
 
@@ -435,7 +466,7 @@ void _initLogFile()
     }
 	
     // set up the policy we'll be executing
-    // read the numbers from the list we have stored
+    // read the numbHS_OBJECTS_ALLOCATEDers from the list we have stored
     // TODO: we'll get better granularity with the
     // hires timer but overhead might be costly
     //const char *policyName = policy.name;
@@ -462,6 +493,7 @@ void _initLogFile()
     char fileName[128];
     strcpy(fileName, baseDir);
     strcat(fileName, processName);
+    strcat(fileName, ".txt");
     
     // create the directory for log files
     mkdir("/sdcard/robust",  S_IRWXU | S_IRWXG | S_IRWXO);
@@ -485,6 +517,7 @@ void _initLogFile()
     seqNumber = 1;
     threshold = (128 << 10);
     threshSet = false;
+    schedGC = false;
 }
 
 // get time from RTC
@@ -541,9 +574,10 @@ void logCPUSpeed(char* speed)
 }
     
 
-int skipLogging;
+int skipLogging = 0;
 int seqNumber;
 bool logReady;
+bool schedGC; // Sched GC
 FILE* fileLog;
 //string policyName;
 int policyNumber;

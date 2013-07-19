@@ -16,7 +16,7 @@
 #define LOG_GC 2
 #define LOG_WAIT_CONC_GC 3
 #define LOG_GC_SCHED 4
-#define MAX_STRING_LENGTH 384
+#define MAX_STRING_LENGTH 512
 
 #define dvmGetThreadCpuTimeMsec() (dvmGetThreadCpuTimeNsec() / 1000000)
 using namespace std;
@@ -29,6 +29,7 @@ extern int policyNumber;
 extern unsigned int minGCTime;
 extern unsigned int intervals;
 extern FILE* fileLog;
+extern bool schedGC;
 
 extern size_t lastRequestedSize;
 extern string processName;

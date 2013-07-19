@@ -188,7 +188,7 @@ static void *tryMalloc(size_t size)
     logPrint(LOG_TRY_MALLOC, false);
 
     // start a concurrent GC if needed
-    scheduleConcurrentGC();
+    //scheduleConcurrentGC();
 
     // log history
     if (policyNumber == 3)  {
@@ -529,6 +529,16 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     size_t percentFree;
     int oldThreadPriority = INT_MAX;
 
+    // check if we're doing MI2A or MI2E
+    // on MI2A we ignore explicits on MI2E
+    // we use it to schedule GC
+    if ((policyNumber >= 3) && !spec->isPartial && spec->isConcurrent) {
+        if (policyNumber == 4) {
+            schedGC = true;
+        }
+        return;
+    }
+
     logPrint(LOG_GC, spec);
 
     /* The heap lock must be held.
@@ -589,6 +599,9 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
         dvmResumeAllThreads(SUSPEND_FOR_GC);
         rootEnd = dvmGetRelativeTimeMsec();
     }
+    
+    // log when the root set has been scanned                            
+    logPrint(LOG_GC, spec);
 
     /* Recursively mark any objects that marked objects point to strongly.
      * If we're not collecting soft references, soft-reachable

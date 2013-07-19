@@ -27,6 +27,7 @@
 #include "alloc/HeapSource.h"
 #include "alloc/HeapBitmap.h"
 #include "alloc/HeapBitmapInlines.h"
+#include "alloc/Logging.h"
 
 // TODO: find a real header file for these.
 extern "C" int dlmalloc_trim(size_t);
@@ -826,7 +827,7 @@ void* dvmHeapSourceAlloc(size_t n)
          */
         return ptr;
     }
-    if (heap->bytesAllocated > heap->concurrentStartBytes) {
+    if ((policyNumber == 1) && (heap->bytesAllocated > heap->concurrentStartBytes)) {
         /*
          * We have exceeded the allocation threshold.  Wake up the
          * garbage collector.
