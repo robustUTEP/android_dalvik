@@ -191,7 +191,7 @@ static void *tryMalloc(size_t size)
     //scheduleConcurrentGC();
 
     // log history
-    if (policyNumber == 3)  {
+    if ((policyNumber == 4) || (policyNumber == 5))  {
         saveHistory();
     }
     
@@ -237,7 +237,7 @@ static void *tryMalloc(size_t size)
     if (policyNumber != 1) {
         
         // if we're running MI2a set the threshold
-        if (policyNumber == 3) {
+        if ((policyNumber == 4) || (policyNumber == 5)) {
             setThreshold();
         }
         ptr = dvmHeapSourceAllocAndGrow(size);
@@ -245,14 +245,16 @@ static void *tryMalloc(size_t size)
 
             dvmHeapSourceGetIdealFootprint();
         }
-
-        // if it's been less than the min GC time
-        // return, otherwise run a GC
-        u8 elapsedSinceGC = dvmGetTotalProcessCpuTimeMsec() - lastGCTime;
-        if ((policyNumber == 3) && (ptr != NULL)) {
+        
+        // MI policies actively schedule so they should finish here if allocation is successful
+        if ((policyNumber >= 4) && (ptr != NULL)) {
             logPrint(LOG_TRY_MALLOC, true);
             return ptr;
         }
+        
+        // if it's been less than the min GC time
+        // return, otherwise run a GC
+        u8 elapsedSinceGC = dvmGetTotalProcessCpuTimeMsec() - lastGCTime;
         if ((elapsedSinceGC < minGCTime) && (ptr != NULL)) {
             logPrint(LOG_TRY_MALLOC, true);
             return ptr;
@@ -532,10 +534,16 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     // check if we're doing MI2A or MI2E
     // on MI2A we ignore explicits on MI2E
     // we use it to schedule GC
-    if ((policyNumber >= 3) && !spec->isPartial && spec->isConcurrent) {
-        if (policyNumber == 4) {
+    if ((policyNumber >= 4) && !spec->isPartial && spec->isConcurrent) {
+        if (policyNumber == 5) {
             schedGC = true;
         }
+        return;
+    }
+    
+    // MI2S skips concurrent so catch it and ignore it
+    if ((policyNumber == 3) && spec->isPartial && spec->isConcurrent)
+    {
         return;
     }
 

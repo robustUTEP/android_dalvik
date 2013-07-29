@@ -39,7 +39,7 @@ struct GcPolSpec {
 };
 
 static GcPolSpec stockPol = {
-  "default",
+  "baseline",
   1,
   0,
   0
@@ -55,34 +55,34 @@ static GcPolSpec GcPolMI2 = {
 
 GcPolSpec *MI2 = &GcPolMI2;
 
+static GcPolSpec GcPolMI2S = {
+  "MI2S",
+  3,
+  2000,
+  5
+};
+
+GcPolSpec *MI2S = &GcPolMI2S;
+
 static GcPolSpec GcPolMI2A = {
   "MI2A",
-  3,
+  4,
   2000,
   5
 };
 
 GcPolSpec *MI2A = &GcPolMI2A;
 
-static GcPolSpec GcPolMI4 = {
-  "MI4",
-  4,
-  4000,
-  0
-};
-
-GcPolSpec *MI4 = &GcPolMI4;
-
-static GcPolSpec GcPolMI4A = {
-  "MI4A",
+static GcPolSpec GcPolMI2AE = {
+  "MI2AE",
   5,
-  4000,
+  2000,
   5
 };
 
-GcPolSpec *MI4A = &GcPolMI4A;
+GcPolSpec *MI2AE = &GcPolMI2AE;
 
-const GcPolSpec policies[5] = {stockPol, GcPolMI2, GcPolMI2A, GcPolMI4, GcPolMI4A};
+const GcPolSpec policies[5] = {stockPol, GcPolMI2, GcPolMI2S, GcPolMI2A, GcPolMI2AE};
 GcPolSpec policy;
 
 void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
@@ -352,7 +352,8 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
 
 void scheduleConcurrentGC() 
 {
-  if (policyNumber != 1) {
+  // only adaptive policies schedule concurrent GC
+  if (policyNumber >= 4) {
 	u8 timeSinceLastGC = dvmGetTotalProcessCpuTimeMsec() - lastGCTime;
 
 	// check and see if we're at the min time from a concurrent GC
@@ -460,13 +461,13 @@ void _initLogFile()
 	        polNumb = polNumb * -1;
 	        ALOGD("Skipping GC/Malloc logging using policy %d skipLogging %d", polNumb, skipLogging);
 	    } 
-	    if ((polNumb > 0) && (polNumb < NUM_POLICIES)) {
+	    if ((polNumb > 0) && (polNumb <= NUM_POLICIES)) {
 	      policy = policies[polNumb - 1];
 	    }
     }
 	
     // set up the policy we'll be executing
-    // read the numbHS_OBJECTS_ALLOCATEDers from the list we have stored
+    // read the numbers from the list we have stored
     // TODO: we'll get better granularity with the
     // hires timer but overhead might be costly
     //const char *policyName = policy.name;
@@ -474,6 +475,7 @@ void _initLogFile()
     minGCTime = policy.minTime;
     intervals = policy.intervals;
     ALOGD("Robust Log policy Number %d", policyNumber);
+	ALOGD("MinGCTime %d", minGCTime);
 	
     // figure out actual timer granularity
     u8 startG = dvmGetTotalProcessCpuTimeNsec();
