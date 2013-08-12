@@ -195,7 +195,7 @@ void logMalloc(bool mallocFail)
         }
         
         if (numMallocs > maxMallocs) {
-            u8 currentMallocTime = dvmGetTotalProcessCpuTimeMsec();
+            u8 currentMallocTime = dvmGetRTCTimeMsec();
             numChecks++;
             if (currentMallocTime - lastMallocTime > 100) {
                 beginOrEnd = "begin";
@@ -354,7 +354,7 @@ void scheduleConcurrentGC()
 {
   // only adaptive policies schedule concurrent GC
   if (policyNumber >= 4) {
-	u8 timeSinceLastGC = dvmGetTotalProcessCpuTimeMsec() - lastGCTime;
+	u8 timeSinceLastGC = dvmGetRTCTimeMsec() - lastGCTime;
 
 	// check and see if we're at the min time from a concurrent GC
 	if (timeSinceLastGC > minGCTime)	{
@@ -371,7 +371,7 @@ void scheduleConcurrentGC()
         schedGC = false;
         // to prevent succesive calls from succeding
         // if gc doesn't complete soon
-        lastGCTime = dvmGetTotalProcessCpuTimeMsec();
+        lastGCTime = dvmGetRTCTimeMsec();
 		dvmInitConcGC();
 	  }
 	}

@@ -254,7 +254,7 @@ static void *tryMalloc(size_t size)
         
         // if it's been less than the min GC time
         // return, otherwise run a GC
-        u8 elapsedSinceGC = dvmGetTotalProcessCpuTimeMsec() - lastGCTime;
+        u8 elapsedSinceGC = dvmGetRTCTimeMsec() - lastGCTime;
         if ((elapsedSinceGC < minGCTime) && (ptr != NULL)) {
             logPrint(LOG_TRY_MALLOC, true);
             return ptr;
@@ -781,7 +781,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     }
 		
     // update last GC Time
-    lastGCTime = dvmGetTotalProcessCpuTimeMsec();
+    lastGCTime = dvmGetRTCTimeMsec();
     
 	/* Write GC info to log if the log's ready
      */
