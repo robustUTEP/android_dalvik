@@ -25,7 +25,7 @@ bool threshSet;
 struct timespec startTime;
 int mallocsDone;
 
-// GC Policies
+//GC Policies
 //typedef struct GcPolSpec GcPolSpec
 struct GcPolSpec {
 	/* Name of the policy */
