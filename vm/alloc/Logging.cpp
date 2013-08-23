@@ -449,7 +449,10 @@ void _initLogFile()
         fclose(fdPol);
     }
 	
-    policy = policies[0];
+	// defaults 
+	// MI2A and no logging
+    policy = policies[3];
+    skipLogging = 1;
 
     if (polVal[0]) {
 	    int polNumb = atoi(polVal);
@@ -463,6 +466,7 @@ void _initLogFile()
 	    } 
 	    if ((polNumb > 0) && (polNumb <= NUM_POLICIES)) {
 	      policy = policies[polNumb - 1];
+	      skipLogging = 0;
 	    }
     }
 	
