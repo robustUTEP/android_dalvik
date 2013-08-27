@@ -12,7 +12,7 @@
            fetch="ssh://git@github.com" />
           
   <remote  name="robust"
-           fetch="https://github.com" />
+           fetch="http://github.com" />
 
   <default revision="refs/heads/jellybean"
            remote="github"
@@ -31,7 +31,7 @@
   <project path="bootable/diskinstaller" name="CyanogenMod/android_bootable_diskinstaller" />
   <project path="bootable/recovery" name="CyanogenMod/android_bootable_recovery" />
   <project path="cts" name="CyanogenMod/android_cts" />
-  <project path="dalvik" name="robustUTEP/android_dalvik" remote="robust" revision="refs/heads/to-upload"/>
+  <project path="dalvik" name="robustUTEP/android_dalvik" remote="robust" revision="to-upload"/>
   <project path="development" name="CyanogenMod/android_development" />
   <project path="device/common" name="CyanogenMod/android_device_common" />
   <project path="device/generic/armv7-a-neon" name="CyanogenMod/android_device_generic_armv7-a-neon" />
