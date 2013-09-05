@@ -451,8 +451,7 @@ void _initLogFile()
 	
 	// defaults 
 	// MI2A and no logging
-    policy = policies[3];
-    skipLogging = 1;
+    policy = policies[0];
 
     if (polVal[0]) {
 	    int polNumb = atoi(polVal);
@@ -469,6 +468,10 @@ void _initLogFile()
 	      skipLogging = 0;
 	    }
     }
+    else {
+        policy = policies[3];
+        skipLogging = 1;
+    }
 	
     // set up the policy we'll be executing
     // read the numbers from the list we have stored
@@ -481,6 +484,16 @@ void _initLogFile()
     ALOGD("Robust Log policy Number %d", policyNumber);
 	ALOGD("MinGCTime %d", minGCTime);
 	
+	// set initial values	
+    logReady = true;
+    seqNumber = 1;
+    threshold = (128 << 10);
+    threshSet = false;
+    schedGC = false;
+	
+    if (skipLogging) {
+        return;
+    }
     // figure out actual timer granularity
     u8 startG = dvmGetTotalProcessCpuTimeNsec();
     u8 end = startG;
