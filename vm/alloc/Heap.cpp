@@ -787,6 +787,9 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
      */
     logPrint(LOG_GC, spec);
     
+    // check if we exec continious GC
+    // if so we re-execute the same GC
+    continousGC(spec);
 }
 
 /*

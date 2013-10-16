@@ -24,6 +24,8 @@ int currInterval = 0;
 bool threshSet;
 struct timespec startTime;
 int mallocsDone;
+char thisProcessName[80];
+int inGC;
 
 //GC Policies
 //typedef struct GcPolSpec GcPolSpec
@@ -412,7 +414,8 @@ void _initLogFile()
 
     /* Get process name
      */
-    const char *processName = get_process_name();
+    const char* processName = get_process_name();
+    strcpy(thisProcessName, processName);
     
     // if we're a blacklisted process
     // skip logging
@@ -537,10 +540,12 @@ void _initLogFile()
     threshold = (128 << 10);
     threshSet = false;
     schedGC = false;
+    inGC = 0;
 }
 
 // get time from RTC
-// could shift slightly but shouldn't affect us much
+// could shift slightly due to time corrections
+// but shouldn't affect us much
 u8 dvmGetRTCTimeNsec()
 {
 #ifdef HAVE_POSIX_CLOCKS
@@ -589,6 +594,29 @@ void logCPUSpeed(char* speed)
         speed[0] = '\0';
         ALOGD("Robust Log Failed to open CPU speed file: %s",strerror(errno));
     }
+    
+}
+
+int continousGC(const GcSpec* spec)
+{
+    char baseDir[] = "/sdcard/robust/";
+    char fileName[128];
+    strcpy(fileName, baseDir);
+    strcat(fileName, thisProcessName);
+    strcat(fileName, ".gc");
+    
+    // check and see if we can open
+    // processName.gc if so return 1
+    // else return 0
+    FILE *gcFile = fopen(fileName, "rt");
+    while (gcFile && !inGC) {
+        inGC = 1;
+        fclose(gcFile);
+        dvmCollectGarbageInternal(spec);
+        gcFile = fopen(fileName, "rt");
+    }
+    inGC = 0;
+    return 0;
     
 }
     

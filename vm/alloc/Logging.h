@@ -143,4 +143,11 @@ inline void initLogFile()
 
 void logCPUSpeed(char* speed);
 
+/**
+ * Checks to see if we run continous GC
+ * by checking to see if processName.gc exists
+ */
+ 
+int continousGC(const GcSpec* spec);
+
 #endif  // ROBUST_LOG_H_
