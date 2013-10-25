@@ -789,7 +789,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     
     // check if we exec continious GC
     // if so we re-execute the same GC
-    continousGC(spec);
+    continousGC(GC_FOR_MALLOC);//spec);
 }
 
 /*
