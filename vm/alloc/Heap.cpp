@@ -222,6 +222,7 @@ static void *tryMalloc(size_t size)
     // of running gcs
     if (policyNumber != 1) {
         
+        ALOGD("Robust Policy Check Malloc Fail");
         // if we're running MI2a set the threshold
         if ((policyNumber == 4) || (policyNumber == 5)) {
             setThreshold();
@@ -231,6 +232,7 @@ static void *tryMalloc(size_t size)
         // MI policies actively schedule so they should finish here if allocation is successful
         if ((policyNumber >= 4) && (ptr != NULL)) {
             logPrint(LOG_TRY_MALLOC, true);
+            ALOGD("Robust Policy Check Malloc Fail Grow");
             return ptr;
         }
         
@@ -239,9 +241,11 @@ static void *tryMalloc(size_t size)
         u8 elapsedSinceGC = dvmGetRTCTimeMsec() - lastGCTime;
         if ((elapsedSinceGC < minGCTime) && (ptr != NULL)) {
             logPrint(LOG_TRY_MALLOC, true);
+            ALOGD("Robust Policy Check Malloc Fail Below Threshold Time");
             return ptr;
         }
         
+        ALOGD("Robust Policy Check Malloc Fail GC");        
     }
 
     /*
@@ -763,7 +767,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     
     // check if we exec continious GC
     // if so we re-execute the same GC
-    continousGC(GC_FOR_MALLOC);//spec);
+    //continousGC(GC_FOR_MALLOC);//spec);
 }
 
 /*

@@ -17,6 +17,10 @@
 #include "sys/stat.h"
 #include "alloc/Logging.h"
 
+// comment out to remove 
+// logcat debugging
+#define snappyDebugging
+
 int tryMallocSequenceNumber = 0;
 u8 currentMallocTime = 0;
 u8 rootScanTime = 0;
@@ -89,23 +93,23 @@ GcPolSpec policy;
 
 void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
 {
-    static int numEvents = 0;
+        
     if (skipLogging) {
-        numEvents++;
-        if (numEvents >= 500) {
-            scheduleConcurrentGC();
-            numEvents =0;
-        }
+        #ifdef snappyDebugging
+        //ALOGD("Skipping Logging");
+        #endif
         return;
     }
     
     initLogFile();
-    if(!logReady) {
+    if((!logReady) || skipLogging) {
         return;
     }
 
     if (fileLog == NULL) {
+        #ifdef snappyDebugging
         ALOGD("GC Logging file closed after succesful open, assertion would have failed");
+        #endif
         return;
     }
 
@@ -205,6 +209,13 @@ void logMalloc(bool mallocFail)
                 logStart = false;
                 mallocsDone = maxMallocs * numChecks;
                 writeLogEvent(LOG_TRY_MALLOC, beginOrEnd.c_str(), "TryMalloc", thisMallocSeqNumb, NULL);
+                
+                // save history
+                // log history
+                if ((policyNumber == 4) || (policyNumber == 5)) {
+                    saveHistory();
+                }
+
                 
                 lastMallocTime = currentMallocTime;
                 maxMallocs = numChecks * maxMallocs / 10;
@@ -352,12 +363,20 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
 
 void scheduleConcurrentGC()
 {
+    #ifdef snappyDebugging
+    ALOGD("Robust Schedule Concurrent");
+    #endif
     // only adaptive policies schedule concurrent GC
     if (policyNumber >= 4) {
         u8 timeSinceLastGC = dvmGetRTCTimeMsec() - lastGCTime;
 
         // check and see if we're at the min time from a concurrent GC
         if (timeSinceLastGC > minGCTime)        {
+
+            #ifdef snappyDebugging
+            ALOGD("Robust Schedule Concurrent Min Time Complete");
+            #endif
+            
             // if we've hit the threshold schedule a concurrent GC
             size_t heapsAlloc[2], heapsFootprint[2];
             heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = 0;
@@ -375,30 +394,74 @@ void scheduleConcurrentGC()
             }
         }
     }
+    #ifdef snappyDebugging
+    ALOGD("Robust Schedule Concurrent Complete");
+    #endif
 }
 
 /*
  * Saves free memory history
  */
 
-void saveHistory(){
+void saveHistory()
+{
+    #ifdef snappyDebugging
+    ALOGD("Robust Saving History");
+    #endif 
 
-    //if (!threshSet) {
-        size_t heapsAlloc[2], heapsFootprint[2];
-        heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = 0;
+    // Save history every tenth second or so
+    // make sure we don't do time calls to 
+    // often otherwise sys slows down.
+    static int timesCalled = 0; // # of times called
+    static int callsThreshold = 500; // threshold before we check time
+    static u8 lastSaveTime = 0;
+    u8 currentTime;
+    timesCalled++;
+    
+    if (timesCalled > callsThreshold) {
+        // check if its been 1/10th of a second
+        currentTime = dvmGetRTCTimeMsec();
+        if ((currentTime - lastSaveTime) > 100) {
+        
+            #ifdef snappyDebugging
+            ALOGD("Robust Saving History Min Time Reached");
+            #endif
+            // if so save the current free space
+            size_t heapsAlloc[2], heapsFootprint[2];
+            heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = 0;
 
-        dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, heapsAlloc, 2);
-        dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
-                freeHistory[currInterval] = heapsFootprint[0] - heapsAlloc[0];
-                currInterval = (currInterval + 1) % intervals;
-        //}
+            dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, heapsAlloc, 2);
+            dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
+                    freeHistory[currInterval] = heapsFootprint[0] - heapsAlloc[0];
+                    currInterval = (currInterval + 1) % intervals;
+            
+            // set the call threshold to 1/8 of what happened  + 100
+            callsThreshold = (timesCalled >> 8) + 100;           
+            timesCalled = 0;
+            
+            // set this time as the last save time
+            lastSaveTime = currentTime;
+             
+            // and check to see if we should run a concurrent GC
+            scheduleConcurrentGC();
+        }
+   }
+   #ifdef snappyDebugging
+   ALOGD("Robust Saving History Complete");
+   #endif
 }
 
 void setThreshold(void)
 {
+    #ifdef snappyDebugging
+    ALOGD("Robust Setting Threshold");
+    #endif 
     // originally was only set once now we set each time
-        threshold = freeHistory[(currInterval + (intervals + 1)) % intervals];
-        threshSet = true;
+    threshold = freeHistory[(currInterval + (intervals + 1)) % intervals];
+    threshSet = true;
+    #ifdef snappyDebugging
+    ALOGD("Robust Setting Threshold Complete");
+    #endif 
 }
     
 /*
@@ -420,7 +483,9 @@ void _initLogFile()
         return;
     }
 
+    #ifdef snappyDebugging
     ALOGD("Robust Log %s != zygote not skipping", processName);
+    #endif
 
     // we're a valid process so set
     // initialization as complete
@@ -447,23 +512,27 @@ void _initLogFile()
         fclose(fdPol);
     }
         
-        // defaults
-        // MI2A and no logging
-    policy = policies[0];
+    // defaults
+    // MI2A and logging
+    policy = policies[4];
+    skipLogging = 0;
 
     if (polVal[0]) {
          int polNumb = atoi(polVal);
-         ALOGD("Policy Number %d", polNumb);
+         #ifdef snappyDebugging
+         ALOGD("Robust Log Policy Number %d", polNumb);
+         #endif
         
          // check if logging should be skipped
          if (polNumb < 0) {
-         skipLogging = 1;
-         polNumb = polNumb * -1;
-         ALOGD("Skipping GC/Malloc logging using policy %d skipLogging %d", polNumb, skipLogging);
+             skipLogging = 1;
+             polNumb = polNumb * -1;
+             //#ifdef snappyDebugging
+             ALOGD("Robust Log Skipping GC/Malloc logging using policy %d skipLogging %d", polNumb, skipLogging);
+             //#endif
          }
          if ((polNumb > 0) && (polNumb <= NUM_POLICIES)) {
-         policy = policies[polNumb - 1];
-         skipLogging = 0;
+            policy = policies[polNumb - 1];
          }
     }
     else {
@@ -488,7 +557,8 @@ void _initLogFile()
     threshold = (128 << 10);
     threshSet = false;
     schedGC = false;
-        
+    inGC = 0;
+    
     if (skipLogging) {
         return;
     }
@@ -515,7 +585,9 @@ void _initLogFile()
     // create the directory for log files
     mkdir("/sdcard/robust", S_IRWXU | S_IRWXG | S_IRWXO);
 
-    //ALOGD("Robust Log ||%s||", fileName);
+    #ifdef snappyDebugging
+    ALOGD("Robust Log ||%s||", fileName);
+    #endif
     fileLog = fopen(fileName, "at" );
     if (fileLog != NULL) {
         // bump our buffer log size to 12k

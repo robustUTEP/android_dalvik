@@ -57,11 +57,6 @@ INLINE u8 dvmGetRTCTimeMsec(void) {
     return dvmGetRTCTimeNsec() / 1000000;
 }
 
-/*
-void logPrint(int logEventType, const GcSpec* spec);
-void logPrint(int logEventType, bool mallocFail);
-void logPrint(int logEventType);*/
-
 void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec);
 
 extern int skipLogging;
