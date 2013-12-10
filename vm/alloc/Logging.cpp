@@ -19,7 +19,7 @@
 
 // comment out to remove 
 // logcat debugging
-#define snappyDebugging
+//#define snappyDebugging
 
 int tryMallocSequenceNumber = 0;
 u8 currentMallocTime = 0;
@@ -426,6 +426,10 @@ void saveHistory()
             #ifdef snappyDebugging
             ALOGD("Robust Saving History Min Time Reached");
             #endif
+            // and check to see if we should run a concurrent GC
+            // we do this before otherwise we only go back .4 sec
+            scheduleConcurrentGC();
+            
             // if so save the current free space
             size_t heapsAlloc[2], heapsFootprint[2];
             heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = 0;
@@ -441,9 +445,6 @@ void saveHistory()
             
             // set this time as the last save time
             lastSaveTime = currentTime;
-             
-            // and check to see if we should run a concurrent GC
-            scheduleConcurrentGC();
         }
    }
    #ifdef snappyDebugging
