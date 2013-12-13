@@ -200,4 +200,10 @@ void *dvmHeapSourceGetImmuneLimit(bool isPartial);
  */
 size_t dvmHeapSourceGetMaximumSize(void);
 
+/*
+ * Initiates concurrent Garbage collection
+ * Used for kicking off GC outside of heapsource
+ */
+void dvmInitConcGC(void);
+
 #endif  // DALVIK_HEAP_SOURCE_H_

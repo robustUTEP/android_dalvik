@@ -27,6 +27,7 @@
 #include "alloc/HeapSource.h"
 #include "alloc/HeapBitmap.h"
 #include "alloc/HeapBitmapInlines.h"
+#include "alloc/Logging.h"
 
 static void snapIdealFootprint();
 static void setIdealFootprint(size_t max);
@@ -925,7 +926,7 @@ void* dvmHeapSourceAlloc(size_t n)
          */
         return ptr;
     }
-    if (heap->bytesAllocated > heap->concurrentStartBytes) {
+    if ((policyNumber == 1) && (heap->bytesAllocated > heap->concurrentStartBytes)) {
         /*
          * We have exceeded the allocation threshold.  Wake up the
          * garbage collector.
@@ -1495,4 +1496,13 @@ void *dvmHeapSourceGetImmuneLimit(bool isPartial)
     } else {
         return NULL;
     }
+}
+
+/*
+ * Kickoff GC from external source
+ */
+void dvmInitConcGC(void)
+{
+        dvmSignalCond(&gHs->gcThreadCond);
+        return;
 }

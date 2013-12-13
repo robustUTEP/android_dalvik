@@ -42,6 +42,8 @@
 #include <cutils/trace.h>
 #include <cutils/properties.h>
 
+#include "alloc/Logging.h"
+
 static int debugalloc()
 {
     char value[PROPERTY_VALUE_MAX];
@@ -199,6 +201,13 @@ static void *tryMalloc(size_t size)
     int result = -1;
     char* hprof_file = NULL;
     char prop_value[PROPERTY_VALUE_MAX] = {'\0'};
+    
+    logPrint(LOG_TRY_MALLOC, false);
+      
+     // log history
+     if ((policyNumber == 4) || (policyNumber == 5)) {
+         saveHistory();
+     }
 
 //TODO: figure out better heuristics
 //    There will be a lot of churn if someone allocates a bunch of
@@ -212,8 +221,44 @@ static void *tryMalloc(size_t size)
 
     ptr = dvmHeapSourceAlloc(size);
     if (ptr != NULL) {
+        logPrint(LOG_TRY_MALLOC, false);
         return ptr;
     }
+   
+     
+     // malloc failed so log it if we didn't already
+     logPrint(LOG_TRY_MALLOC, true);
+     
+     // if we're running MI policy then
+     // check if heap should grow instead
+     // of running gcs
+     if (policyNumber != 1) {
+         
+         //ALOGD("Robust Policy Check Malloc Fail");
+         // if we're running MI2a set the threshold
+         if ((policyNumber == 4) || (policyNumber == 5)) {
+             setThreshold();
+         }
+         ptr = dvmHeapSourceAllocAndGrow(size);
+         
+         // MI policies actively schedule so they should finish here if allocation is successful
+         if ((policyNumber >= 4) && (ptr != NULL)) {
+             logPrint(LOG_TRY_MALLOC, true);
+             //ALOGD("Robust Policy Check Malloc Fail Grow");
+             return ptr;
+         }
+         
+         // if it's been less than the min GC time
+         // return, otherwise run a GC
+         u8 elapsedSinceGC = dvmGetRTCTimeMsec() - lastGCTime;
+         if ((elapsedSinceGC < minGCTime) && (ptr != NULL)) {
+             logPrint(LOG_TRY_MALLOC, true);
+             //ALOGD("Robust Policy Check Malloc Fail Below Threshold Time");
+             return ptr;
+         }
+         
+        //ALOGD("Robust Policy Check Malloc Fail GC");        
+     }
 
     /*
      * The allocation failed.  If the GC is running, block until it
@@ -224,7 +269,9 @@ static void *tryMalloc(size_t size)
          * The GC is concurrently tracing the heap.  Release the heap
          * lock, wait for the GC to complete, and retrying allocating.
          */
+        logPrint(LOG_WAIT_CONC_GC);
         dvmWaitForConcurrentGcToComplete();
+        logPrint(LOG_WAIT_CONC_GC);
     } else {
       /*
        * Try a foreground GC since a concurrent GC is not currently running.
@@ -234,6 +281,7 @@ static void *tryMalloc(size_t size)
 
     ptr = dvmHeapSourceAlloc(size);
     if (ptr != NULL) {
+        logPrint(LOG_TRY_MALLOC, true);
         return ptr;
     }
 
@@ -252,6 +300,7 @@ static void *tryMalloc(size_t size)
         LOGI_HEAP("Grow heap (frag case) to "
                 "%zu.%03zuMB for %zu-byte allocation",
                 FRACTIONAL_MB(newHeapSize), size);
+        logPrint(LOG_TRY_MALLOC, true);
         return ptr;
     }
 
@@ -267,6 +316,7 @@ static void *tryMalloc(size_t size)
     gcForMalloc(true);
     ptr = dvmHeapSourceAllocAndGrow(size);
     if (ptr != NULL) {
+        logPrint(LOG_TRY_MALLOC, true);
         return ptr;
     }
 //TODO: maybe wait for finalizers and try one last time
@@ -315,6 +365,7 @@ static void *tryMalloc(size_t size)
         }
     }
 
+    logPrint(LOG_TRY_MALLOC, true);
     return NULL;
 }
 
@@ -509,8 +560,26 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     size_t currAllocated, currFootprint;
     size_t percentFree;
     int oldThreadPriority = INT_MAX;
-
-    /* The heap lock must be held.
+    
+     // check if we're doing MI2A or MI2E
+     // on MI2A we ignore explicits on MI2E
+     // we use it to schedule GC
+     if ((policyNumber >= 4) && !spec->isPartial && spec->isConcurrent) {
+         if (policyNumber == 5) {
+             schedGC = true;
+         }
+         return;
+     }
+     
+     // MI2S skips concurrent so catch it and ignore it
+     if ((policyNumber == 3) && spec->isPartial && spec->isConcurrent)
+     {
+         return;
+    }
+ 
+     logPrint(LOG_GC, spec);
+     
+     /* The heap lock must be held.
      */
 
     if (gcHeap->gcRunning) {
@@ -585,6 +654,11 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
         ATRACE_END(); // Suspend A
         rootEnd = dvmGetRelativeTimeMsec();
     }
+    
+    // log when the root set has been scanned
+    // at this point GC has released everything
+    // and is running concurrently with the mutator
+    logPrint(LOG_GC, spec);
 
     /* Recursively mark any objects that marked objects point to strongly.
      * If we're not collecting soft references, soft-reachable
@@ -761,6 +835,16 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     }
 
     ATRACE_END(); // Top-level GC
+
+    // update last GC Time
+    lastGCTime = dvmGetRTCTimeMsec();
+    
+    /* Write GC info to log if the log's ready*/
+    logPrint(LOG_GC, spec);
+    
+    // check if we exec continious GC
+    // if so we re-execute the same GC
+    //continousGC(GC_FOR_MALLOC);//spec);
 }
 
 /*
