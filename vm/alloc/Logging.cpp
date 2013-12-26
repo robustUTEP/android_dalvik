@@ -3,6 +3,8 @@
 #include <string>
 #include <time.h>
 #include <sys/time.h>
+#include <unistd.h>
+
 #include <errno.h>
 
 #include "Dalvik.h"
@@ -18,7 +20,7 @@
 #include "alloc/Logging.h"
 
 // comment out to remove 
-// logcat debugging
+// logcat debugging s
 //#define snappyDebugging
 
 int tryMallocSequenceNumber = 0;
@@ -281,8 +283,8 @@ char* buildBasicEvent(const char* beginEnd,const char* eventName, int seqNumber,
     //char cpuSpeed[] = "noData";
     //logCPUSpeed(cpuSpeed);
 
-    sprintf(output, "@%s%s{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appTime-ms\":%llu",
-        beginEnd, eventName, seqNumber, wcTime, appTime);
+    sprintf(output, "@%s%s{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appTime-ms\":%llu,\"priority\":%d",
+        beginEnd, eventName, seqNumber, wcTime, appTime, os_getThreadPriorityFromSystem());
     return output;
 }
 
@@ -324,7 +326,8 @@ void buildGCEvent(const char* beginEnd,const char* eventName, int seqNumber, con
     char cpuSpeed[] = "noData ";
     logCPUSpeed(cpuSpeed);
 
-    sprintf(output, "%s,\"GCType\":\"%s\",\"cpuSpeed-Hz\":\"%s\",\"rootScanTime\":%llu", partial, spec->reason, cpuSpeed, rootScanTime);
+    sprintf(output, "%s,\"GCType\":\"%s\",\"cpuSpeed-Hz\":\"%s\",\"rootScanTime\":%llu,\"bytesFreed-kb\":%f,\"objectsFreed\":%u",
+        partial, spec->reason, cpuSpeed, rootScanTime, numBytesFreedLog / 1024.0, objsFreed);
 }
 
 /*
@@ -478,6 +481,7 @@ void _initLogFile()
 
     /* Get process name */
     const char* processName = get_process_name();
+    pid_t pid = 1111;// getpid();
     strcpy(thisProcessName, processName);
     
     // if we're a blacklisted process
@@ -504,6 +508,7 @@ void _initLogFile()
 
     char polFile[] = "/sdcard/robust/GCPolicy.txt";
     char polVal[2];
+    char uniqName[64];
     GcPolSpec policy;
 
     // check and see if we have GC policy
@@ -513,6 +518,7 @@ void _initLogFile()
     if (fdPol != NULL) {
         //ALOGD("Robust Log policy file open");
         fscanf(fdPol, "%s", polVal);
+        fscanf(fdPol, "%s", uniqName);
         fclose(fdPol);
     }
         
@@ -562,6 +568,7 @@ void _initLogFile()
     threshSet = false;
     schedGC = false;
     inGC = 0;
+    pid = getpid();
     
     if (skipLogging) {
         return;
@@ -596,8 +603,8 @@ void _initLogFile()
     if (fileLog != NULL) {
         // bump our buffer log size to 12k
         setvbuf(fileLog, NULL, _IOFBF, 12287);
-        fprintf(fileLog, "\n\n@header{\"device\":\"maguro\",\"process\":\"%s\",\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n",
-            processName, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
+        fprintf(fileLog, "\n\n@header{\"device\":\"maguro\",\"uniqueName\":\"%s\":\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n",
+            uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
     }
     else {
         ALOGD("Robust Log fail open %s %s", processName,strerror(errno));
@@ -724,6 +731,8 @@ FILE* fileLog;
 int policyNumber;
 unsigned int minGCTime;
 unsigned int intervals;
+size_t numBytesFreedLog;
+size_t objsFreed;
 
 size_t lastRequestedSize = 0;
 //string processName;
