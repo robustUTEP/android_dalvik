@@ -90,6 +90,15 @@ static GcPolSpec GcPolMI2AE = {
 
 GcPolSpec *MI2AE = &GcPolMI2AE;
 
+static GcPolSpec GcPolMI2AI = {
+  "MI2AI",
+  6,
+  2000,
+  5
+};
+
+GcPolSpec *MI2AI = &GcPolMI2AI;
+
 const GcPolSpec policies[5] = {stockPol, GcPolMI2, GcPolMI2S, GcPolMI2A, GcPolMI2AE};
 GcPolSpec policy;
 
