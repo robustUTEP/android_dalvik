@@ -99,7 +99,7 @@ static GcPolSpec GcPolMI2AI = {
 
 GcPolSpec *MI2AI = &GcPolMI2AI;
 
-const GcPolSpec policies[5] = {stockPol, GcPolMI2, GcPolMI2S, GcPolMI2A, GcPolMI2AE};
+const GcPolSpec policies[6] = {stockPol, GcPolMI2, GcPolMI2S, GcPolMI2A, GcPolMI2AE, GcPolMI2AI};
 GcPolSpec policy;
 
 void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
