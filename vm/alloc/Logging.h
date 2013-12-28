@@ -37,6 +37,8 @@ extern int freeHistory[10]; // histogram
 extern size_t threshold; // threshold for starting concurrent GC
 extern u8 lastGCTime; // for scheduling GCs
 static int initLogDone;
+extern size_t numBytesFreedLog;
+extern size_t objsFreed;
 
 /*
 

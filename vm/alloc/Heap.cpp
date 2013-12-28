@@ -561,11 +561,14 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     size_t percentFree;
     int oldThreadPriority = INT_MAX;
     
-    // check if we're doing MI2A or MI2E
-    // on MI2A we ignore explicits on MI2E
+    logPrint(LOG_GC, spec);
+    
+    // check if we're doing MI2A* or MI2E
+    // on MI2A* we ignore explicits on MI2AE
     // we use it to schedule GC
     if ((policyNumber >= 4) && !spec->isPartial && spec->isConcurrent) {
         if (policyNumber == 5) {
+            logPrint(LOG_GC, spec);
             schedGC = true;
         }
         return;
@@ -574,10 +577,9 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     // MI2S and MI2AI skip concurrent so catch it and ignore it
     if (((policyNumber == 3) || (policyNumber == 6)) && spec->isPartial && spec->isConcurrent)
     {
+        logPrint(LOG_GC, spec);
         return;
     }
- 
-     logPrint(LOG_GC, spec);
      
      /* The heap lock must be held.
      */
