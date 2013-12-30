@@ -224,13 +224,6 @@ void logMalloc(bool mallocFail)
                 #endif
                 writeLogEvent(LOG_TRY_MALLOC, beginOrEnd.c_str(), "TryMalloc", thisMallocSeqNumb, NULL);
                 
-                // save history
-                // log history
-                if ((policyNumber == 4) || (policyNumber == 5)) {
-                    saveHistory();
-                }
-
-                
                 lastMallocTime = currentMallocTime;
                 maxMallocs = numChecks * maxMallocs / 10;
                 // under certain (rare) circumstances max can go very low

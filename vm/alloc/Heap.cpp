@@ -205,7 +205,7 @@ static void *tryMalloc(size_t size)
     logPrint(LOG_TRY_MALLOC, false);
       
      // log history
-     if ((policyNumber == 4) || (policyNumber == 5)) {
+     if (policyNumber >= 4) {
          saveHistory();
      }
 
