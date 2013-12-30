@@ -16,6 +16,7 @@
 #define LOG_GC 2
 #define LOG_WAIT_CONC_GC 3
 #define LOG_GC_SCHED 4
+#define LOG_IGNORE_EXPLICIT 5
 #define MAX_STRING_LENGTH 512
 
 #define dvmGetThreadCpuTimeMsec() (dvmGetThreadCpuTimeNsec() / 1000000)
@@ -87,6 +88,7 @@ void logGC(const GcSpec* spec);
 void logMalloc(bool MallocFail);
 void logConcGC(void);
 void logGCSched(void);
+void logIgnoreExplicit(void);
 void logBasicEvent(const char* beginEnd, const char* eventName, int seqNumber);
 void logHeapEvent(const char* beginEnd, const char* eventName, int seqNumber);
 void logGCEvent(const char* beginEnd, const char* eventName, int seqNumber, const GcSpec *spec);
@@ -146,6 +148,11 @@ void logCPUSpeed(char* speed);
 */
  
 int continousGC(const GcSpec* spec);
+
+/**
+ * Get device name from the build props
+ */
+void getDeviceName(void);
 
 /*
  * Get the per-process CPU time, in nanoseconds

@@ -31,6 +31,7 @@ bool threshSet;
 struct timespec startTime;
 int mallocsDone;
 char thisProcessName[80];
+char deviceName[25];
 int inGC;
 
 //GC Policies
@@ -138,6 +139,9 @@ void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
         case LOG_GC_SCHED:
                 logGCSched();
                 break;
+        case LOG_IGNORE_EXPLICIT:
+                logIgnoreExplicit();
+                break;
     }
 }
 
@@ -162,21 +166,6 @@ void logGC(const GcSpec* spec)
             beginOrEnd = "end";
             logStage = 0;
     }
-    /*
-if (logStage == 0) {
-beginOrEnd = "begin";
-thisGCSeqNumb = seqNumber++;
-logStage = 1;
-}
-else if (logStage == 1) {
-logStage = 2;
-rootScanTime = dvmGetTotalProcessCpuTimeMsec();
-return;
-}
-else {
-beginOrEnd = "end";
-logStage = 0;
-}*/
 
     writeLogEvent(LOG_GC, beginOrEnd.c_str(), "GC", thisGCSeqNumb, spec);
     
@@ -262,6 +251,10 @@ void logConcGC()
     }
 
     writeLogEvent(LOG_WAIT_CONC_GC, beginOrEnd.c_str(), "WaitConcGC", thisGcSeqNumb, NULL);
+}
+
+void logIgnoreExplicit() {
+    writeLogEvent(LOG_IGNORE_EXPLICIT, "begin", "IgnoreExplicit", seqNumber++, NULL);
 }
 
 /*
@@ -361,6 +354,7 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
                 break;
         case LOG_GC_SCHED:
         case LOG_WAIT_CONC_GC:
+        case LOG_IGNORE_EXPLICIT:
                 buildBasicEvent(beginEnd, eventName, seqNumber, partialEntry);
                 break;
     }
@@ -486,6 +480,8 @@ void _initLogFile()
     pid_t pid = 1111;// getpid();
     strcpy(thisProcessName, processName);
     
+    getDeviceName();
+    
     // if we're a blacklisted process
     // skip logging
     if (!strncmp(processName, "zygote",6) || !strncmp(processName, "dexopt", 6)
@@ -605,8 +601,8 @@ void _initLogFile()
     if (fileLog != NULL) {
         // bump our buffer log size to 12k
         setvbuf(fileLog, NULL, _IOFBF, 12287);
-        fprintf(fileLog, "\n\n@header{\"device\":\"maguro\",\"uniqueName\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n",
-            uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
+        fprintf(fileLog, "\n\n@header{\"deviceName\":\"%s\",\"deviceID\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n",
+            deviceName, uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
     }
     else {
         ALOGD("Robust Log fail open %s %s", processName,strerror(errno));
@@ -723,6 +719,25 @@ u8 dvmGetTotalProcessCpuTimeNsec(void)
 #endif
 }
     
+/*
+ * get the device name for the log
+ */
+void getDeviceName() 
+{
+    // get deviceName
+    FILE *devName = fopen("build.prop", "rt");
+    char buffer[75] = "NotFound"; 
+    if (devName != NULL) {
+        while (fscanf(devName, "%s", buffer) != EOF) {
+            printf("buffer %s\n", buffer);
+            if (strncmp(buffer, "ro.product.device",17) == 0) {
+                memcpy(deviceName, buffer + 18, strlen(buffer) - 17);
+                break;   
+            }
+        }
+        fclose(devName);
+    }
+}
 
 int skipLogging = 0;
 int seqNumber;
