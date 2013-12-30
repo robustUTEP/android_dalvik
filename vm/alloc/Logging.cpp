@@ -612,7 +612,7 @@ void _initLogFile()
     if (fileLog != NULL) {
         // bump our buffer log size to 12k
         setvbuf(fileLog, NULL, _IOFBF, 12287);
-        fprintf(fileLog, "\n\n@header{\"device\":\"maguro\",\"uniqueName\":\"%s\":\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n",
+        fprintf(fileLog, "\n\n@header{\"device\":\"maguro\",\"uniqueName\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n",
             uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
     }
     else {
