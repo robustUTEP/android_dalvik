@@ -568,9 +568,9 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     // we use it to schedule GC
     if (((policyNumber == 3) || (policyNumber >= 5)) && !spec->isPartial && spec->isConcurrent) {
         if (policyNumber == 5) {
-            logPrint(LOG_IGNORE_EXPLICIT);
             schedGC = true;
         }
+        logPrint(LOG_IGNORE_EXPLICIT);
         return;
     }
      
