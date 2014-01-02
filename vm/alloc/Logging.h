@@ -74,6 +74,15 @@ inline void logPrint(int logEventType, const GcSpec* spec)
     logPrint(logEventType, false, spec);
 }
 
+inline void logPrint(int logEventType, const GcSpec* spec, size_t numBytesFreed, size_t numObjectsFreed)
+{
+    numBytesFreedLog = numBytesFreed;
+    objsFreed = numObjectsFreed;
+    logPrint(logEventType, false, spec);
+    numBytesFreedLog = 0;
+    objsFreed = 0;
+}
+
 inline void logPrint(int logEventType, bool mallocFail)
 {
     logPrint(logEventType, mallocFail, NULL);

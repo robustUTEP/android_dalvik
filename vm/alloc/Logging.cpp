@@ -480,8 +480,6 @@ void _initLogFile()
     pid_t pid = 1111;// getpid();
     strcpy(thisProcessName, processName);
     
-    getDeviceName();
-    
     // if we're a blacklisted process
     // skip logging
     if (!strncmp(processName, "zygote",6) || !strncmp(processName, "dexopt", 6)
@@ -496,6 +494,9 @@ void _initLogFile()
     // we're a valid process so set
     // initialization as complete
     initLogDone = 1;
+    
+    // get device name
+    getDeviceName();
 
     /* Get start time so we can identify seperate runs */
     clock_gettime(CLOCK_REALTIME, &startTime);
@@ -724,12 +725,15 @@ u8 dvmGetTotalProcessCpuTimeNsec(void)
  */
 void getDeviceName() 
 {
+    //#ifdef snappyDebugging
+    ALOGD("Robust Log Get Device Name");
+    //#endif
     // get deviceName
-    FILE *devName = fopen("build.prop", "rt");
+    FILE *devName = fopen("/system/build.prop", "rt");
     char buffer[75] = "NotFound"; 
     if (devName != NULL) {
         while (fscanf(devName, "%s", buffer) != EOF) {
-            printf("buffer %s\n", buffer);
+            ALOGD("Robust Log buffer %s\n", buffer);
             if (strncmp(buffer, "ro.product.device",17) == 0) {
                 memcpy(deviceName, buffer + 18, strlen(buffer) - 17);
                 break;   
@@ -737,6 +741,12 @@ void getDeviceName()
         }
         fclose(devName);
     }
+    else {
+        ALOGD("Snappy Log failed to open build.prop!");
+    }
+    //#ifdef snappyDebugging
+    ALOGD("Robust Log Get Device Name Done");
+    //#endif
 }
 
 int skipLogging = 0;

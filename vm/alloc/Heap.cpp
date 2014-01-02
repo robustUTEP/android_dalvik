@@ -837,7 +837,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     lastGCTime = dvmGetRTCTimeMsec();
     
     /* Write GC info to log if the log's ready*/
-    logPrint(LOG_GC, spec);
+    logPrint(LOG_GC, spec, numBytesFreed, numObjectsFreed);
     
     // check if we exec continious GC
     // if so we re-execute the same GC
