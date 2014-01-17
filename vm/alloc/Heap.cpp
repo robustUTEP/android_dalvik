@@ -565,7 +565,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     // on MI2A* we ignore explicits on MI2AE
     // MI2A will allow them to go through
     // MI2S also ignores
-    // we use it to schedule GC
+    // MI2AE uses it to schedule GC
     if (((policyNumber == 3) || (policyNumber >= 5)) && !spec->isPartial && spec->isConcurrent) {
         if (policyNumber == 5) {
             schedGC = true;

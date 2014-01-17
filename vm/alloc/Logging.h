@@ -164,6 +164,11 @@ int continousGC(const GcSpec* spec);
 void getDeviceName(void);
 
 /*
+ * Get the current count if available
+ */
+unsigned long getCount(void);
+
+/*
  * Get the per-process CPU time, in nanoseconds
  *
  * The amount of time the process had been executing

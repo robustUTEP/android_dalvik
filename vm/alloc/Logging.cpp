@@ -108,13 +108,16 @@ void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
         
     if (skipLogging) {
         #ifdef snappyDebugging
-        //ALOGD("Skipping Logging");
+        ALOGD("Skipping Logging %d", logEventType);
         #endif
         return;
     }
     
     initLogFile();
     if((!logReady) || skipLogging) {
+        #ifdef snappyDebugging
+        ALOGD("Robust Log Not Ready %d", logEventType);
+        #endif
         return;
     }
 
@@ -278,8 +281,8 @@ char* buildBasicEvent(const char* beginEnd,const char* eventName, int seqNumber,
     //char cpuSpeed[] = "noData";
     //logCPUSpeed(cpuSpeed);
 
-    sprintf(output, "@%s%s{\"seqNum\":%d,\"wcTime-ms\":%llu,\"appTime-ms\":%llu,\"priority\":%d",
-        beginEnd, eventName, seqNumber, wcTime, appTime, os_getThreadPriorityFromSystem());
+    sprintf(output, "@%s%s{\"seqNum\":%d,\"count\":%lu,\"wcTime-ms\":%llu,\"appTime-ms\":%llu,\"priority\":%d",
+        beginEnd, eventName, seqNumber, getCount(), wcTime, appTime, os_getThreadPriorityFromSystem());
     return output;
 }
 
@@ -432,14 +435,14 @@ void saveHistory()
             // we do this before otherwise we only go back .4 sec
             scheduleConcurrentGC();
             
-            // if so save the current free space
+            // save the current free space
             size_t heapsAlloc[2], heapsFootprint[2];
             heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = 0;
 
             dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, heapsAlloc, 2);
             dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
-                    freeHistory[currInterval] = heapsFootprint[0] - heapsAlloc[0];
-                    currInterval = (currInterval + 1) % intervals;
+            freeHistory[currInterval] = heapsFootprint[0] - heapsAlloc[0];
+            currInterval = (currInterval + 1) % intervals;
             
             // set the call threshold to 1/8 of what happened  + 100
             callsThreshold = (timesCalled >> 8) + 100;           
@@ -472,6 +475,8 @@ void setThreshold(void)
  */
 void _initLogFile()
 {
+    GcPolSpec policy;
+    
     initLogDone = 0;
     skipLogging = 0;
 
@@ -480,10 +485,41 @@ void _initLogFile()
     pid_t pid = 1111;// getpid();
     strcpy(thisProcessName, processName);
     
+    // set initial values        
+    logReady = false;
+    seqNumber = 1;
+    threshold = (128 << 10);
+    threshSet = false;
+    schedGC = false;
+    inGC = 0;   
+     
+    // defaults
+    // MI2A and no logging
+    policy = policies[5];
+
     // if we're a blacklisted process
     // skip logging
-    if (!strncmp(processName, "zygote",6) || !strncmp(processName, "dexopt", 6)
-            || !strncmp(processName, "system_server", 6)) {
+    if (!strncmp(processName, "zygote",6)) {
+        // zygote is where everyone's spawned so we can't turn off logging here
+        #ifdef snappyDebugging
+        ALOGD("Robust skipping process %s",processName);
+        #endif 
+        return;
+    } 
+    if (!strncmp(processName, "dexopt", 6)
+            || !strncmp(processName, "system_server", 6) || !strncmp(processName, "unknown", 6)
+            || !strncmp(processName, "<pre", 4)) {
+        #ifdef snappyDebugging
+        ALOGD("Robust skipping process %s",processName);
+        #endif 
+        // we're a valid process so set
+        // initialization as complete
+        // and set defaults
+        initLogDone = 1;
+        skipLogging = 1;
+        policyNumber = policy.policyNumber;
+        minGCTime = policy.minTime;
+        intervals = policy.intervals;
         return;
     }
 
@@ -494,6 +530,8 @@ void _initLogFile()
     // we're a valid process so set
     // initialization as complete
     initLogDone = 1;
+    
+    pid = getpid();    
     
     // get device name
     getDeviceName();
@@ -508,31 +546,51 @@ void _initLogFile()
     char polFile[] = "/sdcard/robust/GCPolicy.txt";
     char polVal[2];
     char uniqName[64];
-    GcPolSpec policy;
 
     // check and see if we have GC policy
     // file to read the policy from
     FILE *fdPol = fopen(polFile, "rt");
-    //ALOGD("Robust Log attempting to open Policy file %s", polFile);
+    #ifdef snappyDebugging
+    ALOGD("Robust Log attempting to open Policy file %s", polFile);
+    #endif
     if (fdPol != NULL) {
-        //ALOGD("Robust Log policy file open");
+        #ifdef snappyDebugging
+        ALOGD("Robust Log policy file open");
+        #endif
         fscanf(fdPol, "%s", polVal);
         fscanf(fdPol, "%s", uniqName);
         fclose(fdPol);
-    }
-        
-    // defaults
-    // MI2A and logging
-    policy = policies[4];
-    skipLogging = 0;
+    } else {
+        // defaults
+        // MI2A and no logging
+        // yes it's duplicated but the compiler 
+        // misses the fact that it's above
+        policy = policies[5];
+        skipLogging = 1;
 
+        policyNumber = policy.policyNumber;
+        minGCTime = policy.minTime;
+        intervals = policy.intervals;
+        logReady = true;
+        return; // GC Policy file doesn't exist so we just run defaults anyway
+    }
+    
+    // defaults
+    // MI2A and no logging
+    // yes it's duplicated but the compiler 
+    // misses the fact that it's above
+    policy = policies[4];
+    skipLogging = 1;
+    
     if (polVal[0]) {
          int polNumb = atoi(polVal);
          #ifdef snappyDebugging
          ALOGD("Robust Log Policy Number %d", polNumb);
          #endif
-        
          // check if logging should be skipped
+         if (polNumb > 0) {
+            skipLogging = 0;
+         }
          if (polNumb < 0) {
              skipLogging = 1;
              polNumb = polNumb * -1;
@@ -544,30 +602,14 @@ void _initLogFile()
             policy = policies[polNumb - 1];
          }
     }
-    else {
-        policy = policies[3];
-        skipLogging = 1;
-    }
         
     // set up the policy we'll be executing
     // read the numbers from the list we have stored
-    // TODO: we'll get better granularity with the
-    // hires timer but overhead might be costly
-    //const char *policyName = policy.name;
     policyNumber = policy.policyNumber;
     minGCTime = policy.minTime;
     intervals = policy.intervals;
     ALOGD("Robust Log policy Number %d", policyNumber);
         ALOGD("MinGCTime %d", minGCTime);
-        
-        // set initial values        
-    logReady = true;
-    seqNumber = 1;
-    threshold = (128 << 10);
-    threshSet = false;
-    schedGC = false;
-    inGC = 0;
-    pid = getpid();
     
     if (skipLogging) {
         return;
@@ -604,20 +646,13 @@ void _initLogFile()
         setvbuf(fileLog, NULL, _IOFBF, 12287);
         fprintf(fileLog, "\n\n@header{\"deviceName\":\"%s\",\"deviceID\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n",
             deviceName, uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
+        logReady = true;
     }
     else {
         ALOGD("Robust Log fail open %s %s", processName,strerror(errno));
         logReady = false;
         return;
     }
-        
-    // set initial values        
-    logReady = true;
-    seqNumber = 1;
-    threshold = (128 << 10);
-    threshSet = false;
-    schedGC = false;
-    inGC = 0;
 }
 
 void logMeInit()
@@ -725,15 +760,17 @@ u8 dvmGetTotalProcessCpuTimeNsec(void)
  */
 void getDeviceName() 
 {
-    //#ifdef snappyDebugging
+    #ifdef snappyDebugging
     ALOGD("Robust Log Get Device Name");
-    //#endif
+    #endif
     // get deviceName
     FILE *devName = fopen("/system/build.prop", "rt");
     char buffer[75] = "NotFound"; 
     if (devName != NULL) {
         while (fscanf(devName, "%s", buffer) != EOF) {
+            #ifdef snappyDebugging
             ALOGD("Robust Log buffer %s\n", buffer);
+            #endif
             if (strncmp(buffer, "ro.product.device",17) == 0) {
                 memcpy(deviceName, buffer + 18, strlen(buffer) - 17);
                 break;   
@@ -747,6 +784,22 @@ void getDeviceName()
     //#ifdef snappyDebugging
     ALOGD("Robust Log Get Device Name Done");
     //#endif
+}
+
+/*
+ * Get the current count if available
+ */
+unsigned long getCount()
+{
+    FILE *countFile = fopen("/proc/SnappyCount", "rt");
+    char buffer[24];
+    if (countFile) {
+        fscanf(countFile, "%s",buffer);
+        fclose(countFile);
+        return atol(buffer);
+    } else {
+        return 0;
+    }
 }
 
 int skipLogging = 0;
