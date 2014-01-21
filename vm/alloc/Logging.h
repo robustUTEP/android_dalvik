@@ -166,7 +166,7 @@ void getDeviceName(void);
 /*
  * Get the current count if available
  */
-unsigned long getCount(void);
+unsigned long getCount(int cpu);
 
 /*
  * Get the per-process CPU time, in nanoseconds

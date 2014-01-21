@@ -18,6 +18,7 @@
 #include "os/os.h"
 #include "sys/stat.h"
 #include "alloc/Logging.h"
+#include "sched.h"
 
 // comment out to remove 
 // logcat debugging s
@@ -276,13 +277,17 @@ char* buildBasicEvent(const char* beginEnd,const char* eventName, int seqNumber,
 {
     u8 wcTime = dvmGetRTCTimeMsec();
     u8 appTime = dvmGetTotalProcessCpuTimeMsec();
+    unsigned long count;
+    
+    // get the cpu we're running on
+    // and it's associated count
+    int cpu = sched_getcpu();
+    //getcpu(&cpu, NULL, NULL);
+    count = getCount(cpu);
+    
 
-    // not sure how reliable this next section is
-    //char cpuSpeed[] = "noData";
-    //logCPUSpeed(cpuSpeed);
-
-    sprintf(output, "@%s%s{\"seqNum\":%d,\"count\":%lu,\"wcTime-ms\":%llu,\"appTime-ms\":%llu,\"priority\":%d",
-        beginEnd, eventName, seqNumber, getCount(), wcTime, appTime, os_getThreadPriorityFromSystem());
+    sprintf(output, "@%s%s{\"seqNum\":%d,\"cpu\":%d,\"count\":%lu,\"wcTime-ms\":%llu,\"appTime-ms\":%llu,\"priority\":%d",
+        beginEnd, eventName, seqNumber, cpu, count, wcTime, appTime, os_getThreadPriorityFromSystem());
     return output;
 }
 
@@ -669,7 +674,7 @@ void logCPUSpeed(char* speed)
         fclose(cpuFile);
     }
     else {
-        speed[0] = '\0';
+        speed = (char *)"00000\0";
         ALOGD("Robust Log Failed to open CPU speed file: %s",strerror(errno));
     }
     
@@ -787,14 +792,19 @@ void getDeviceName()
 }
 
 /*
- * Get the current count if available
+ * Get the current count on this cpu if available
  */
-unsigned long getCount()
+unsigned long getCount(int cpu)
 {
     FILE *countFile = fopen("/proc/SnappyCount", "rt");
     char buffer[24];
+    int i;
     if (countFile) {
-        fscanf(countFile, "%s",buffer);
+        // move to the correct count value for multi cpu
+        // systems
+        for (i = -1; i < cpu; i++) {
+            fscanf(countFile, "%s",buffer);
+        }
         fclose(countFile);
         return atol(buffer);
     } else {
