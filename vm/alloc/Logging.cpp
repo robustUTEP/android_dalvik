@@ -34,6 +34,10 @@ int mallocsDone;
 char thisProcessName[80];
 char deviceName[25];
 int inGC;
+FILE* fileTest = NULL;
+FILE* notLogged = NULL;
+
+int testTime(void);
 
 //GC Policies
 //typedef struct GcPolSpec GcPolSpec
@@ -101,7 +105,16 @@ static GcPolSpec GcPolMI2AI = {
 
 GcPolSpec *MI2AI = &GcPolMI2AI;
 
-const GcPolSpec policies[6] = {stockPol, GcPolMI2, GcPolMI2S, GcPolMI2A, GcPolMI2AE, GcPolMI2AI};
+static GcPolSpec GcPolMI1AI = {
+  "MI1AI",
+  7,
+  1000,
+  5
+};
+
+GcPolSpec *MI1AI = &GcPolMI1AI;
+
+const GcPolSpec policies[NUM_POLICIES] = {stockPol, GcPolMI2, GcPolMI2S, GcPolMI2A, GcPolMI2AE, GcPolMI2AI, GcPolMI2AI};
 GcPolSpec policy;
 
 void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
@@ -509,18 +522,29 @@ void _initLogFile()
         #ifdef snappyDebugging
         ALOGD("Robust skipping process %s",processName);
         #endif 
+        // se if we can open file here
+        if (fileTest != NULL) 
+            return; //file previously opened
+        //testTime();
+        fileTest = fopen("/sdcard/robust/testFile.txt", "at" );
+        notLogged = fopen("/sdcard/robust/notLogged.txt", "at" );
+        if (fileTest != NULL) {
+            ALOGD("Robust Test file open successful");
+        } else {
+            ALOGD("Robust Log Test fail open /sdcard/robust/testFile.txt %s",strerror(errno));
+        }
         return;
     } 
     if (!strncmp(processName, "dexopt", 6)
             || !strncmp(processName, "system_server", 6) || !strncmp(processName, "unknown", 6)
             || !strncmp(processName, "<pre", 4)) {
-        #ifdef snappyDebugging
+        //#ifdef snappyDebugging
         ALOGD("Robust skipping process %s",processName);
-        #endif 
+        //#endif 
         // we're a valid process so set
-        // initialization as complete
-        // and set defaults
-        initLogDone = 1;
+        // defaults, we may not be a 
+        // full process yet so wait a bit
+        // for full init
         skipLogging = 1;
         policyNumber = policy.policyNumber;
         minGCTime = policy.minTime;
@@ -528,9 +552,9 @@ void _initLogFile()
         return;
     }
 
-    #ifdef snappyDebugging
+    //#ifdef snappyDebugging
     ALOGD("Robust Log %s != zygote not skipping", processName);
-    #endif
+    //#endif
 
     // we're a valid process so set
     // initialization as complete
@@ -555,9 +579,9 @@ void _initLogFile()
     // check and see if we have GC policy
     // file to read the policy from
     FILE *fdPol = fopen(polFile, "rt");
-    #ifdef snappyDebugging
+    //#ifdef snappyDebugging
     ALOGD("Robust Log attempting to open Policy file %s", polFile);
-    #endif
+    //#endif
     if (fdPol != NULL) {
         #ifdef snappyDebugging
         ALOGD("Robust Log policy file open");
@@ -652,9 +676,12 @@ void _initLogFile()
         fprintf(fileLog, "\n\n@header{\"deviceName\":\"%s\",\"deviceID\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n",
             deviceName, uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
         logReady = true;
-    }
-    else {
-        ALOGD("Robust Log fail open %s %s", processName,strerror(errno));
+        return;
+    } else {
+        // all else failed
+        fprintf(notLogged, "%s %d\n",processName, policyNumber);
+        fflush(notLogged);
+        ALOGD("Robust Log fail open %s %s", fileName,strerror(errno));
         logReady = false;
         return;
     }
@@ -810,6 +837,65 @@ unsigned long getCount(int cpu)
     } else {
         return 0;
     }
+}
+
+// internal test function remove before release
+int testTime(void)
+{
+    struct timespec start, stop;
+    //int i = 0;
+    //unsigned int j = 0;
+    //int k = 0;
+    FILE *outfile;
+    long shortTime;
+    long longTime;
+    char string[] = "This is a string";
+    
+    int counter = 0;
+    
+    outfile = fopen("/sdcard/robust/printfile.txt","at");
+    
+    if (!outfile) {
+        //printf("aborting file not opened");
+        return(0);
+    }
+    
+    clock_gettime(CLOCK_REALTIME, &start);
+    for (counter = 0; counter < 1000; counter++) {
+        fprintf(outfile, "%s\n",string);
+    }
+    sleep(5);
+    for (counter = 0; counter < 1000; counter++) {
+        fprintf(outfile, "%s\n",string);
+    }
+    clock_gettime(CLOCK_REALTIME, &stop);
+    shortTime = (stop.tv_sec-start.tv_sec)*1000000000LL + (stop.tv_nsec-start.tv_nsec);
+    
+    fclose(outfile);
+    outfile = fopen("/sdcard/robust/printfile2.txt","at");
+    if (!outfile) {
+        //printf("aborting file2 not opened");
+        return(0);
+    }
+    
+    clock_gettime(CLOCK_REALTIME, &start);
+    for (counter = 0; counter < 1000; counter++) {
+        fprintf(outfile, "%s\n",string);
+    }
+    sleep(5);
+    for (counter = 0; counter < 1000; counter++) {
+        fprintf(outfile, "%s\n",string);
+    }
+    clock_gettime(CLOCK_REALTIME, &stop);
+    longTime = (stop.tv_sec-start.tv_sec)*1000000000LL + (stop.tv_nsec-start.tv_nsec);
+    
+    fclose(outfile);
+    outfile = fopen("/sdcard/robust/results.txt","at");
+    if (outfile) {
+        fprintf(outfile, "times %li %li\n",shortTime, longTime);
+    }
+    fclose(outfile);
+    return(0);
 }
 
 int skipLogging = 0;

@@ -11,7 +11,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define NUM_POLICIES 6
+#define NUM_POLICIES 7
 #define LOG_TRY_MALLOC 1
 #define LOG_GC 2
 #define LOG_WAIT_CONC_GC 3

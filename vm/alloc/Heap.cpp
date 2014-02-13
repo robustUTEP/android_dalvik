@@ -236,7 +236,7 @@ static void *tryMalloc(size_t size)
          
          //ALOGD("Robust Policy Check Malloc Fail");
          // if we're running MI2a set the threshold
-         if ((policyNumber == 4) || (policyNumber == 5)) {
+         if (policyNumber >= 4) {
              setThreshold();
          }
          ptr = dvmHeapSourceAllocAndGrow(size);
