@@ -11,7 +11,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define NUM_POLICIES 7
+#define NUM_POLICIES 9
 #define LOG_TRY_MALLOC 1
 #define LOG_GC 2
 #define LOG_WAIT_CONC_GC 3
@@ -29,8 +29,11 @@ extern string policyName;
 extern int policyNumber;
 extern unsigned int minGCTime;
 extern unsigned int intervals;
+extern unsigned int adaptive;
+extern unsigned int resizeThreshold;
 extern FILE* fileLog;
 extern bool schedGC;
+extern size_t thresholdOnGC;
 
 extern size_t lastRequestedSize;
 extern string processName;
@@ -38,8 +41,10 @@ extern int freeHistory[10]; // histogram
 extern size_t threshold; // threshold for starting concurrent GC
 extern u8 lastGCTime; // for scheduling GCs
 static int initLogDone;
+static int preinit = 0; // if we're an initialization process (ie zygote or sys server)
 extern size_t numBytesFreedLog;
 extern size_t objsFreed;
+extern size_t lastAllocSize;
 
 /*
 
@@ -83,8 +88,9 @@ inline void logPrint(int logEventType, const GcSpec* spec, size_t numBytesFreed,
     objsFreed = 0;
 }
 
-inline void logPrint(int logEventType, bool mallocFail)
+inline void logPrint(int logEventType, bool mallocFail, size_t allocSize, int dummy)
 {
+	lastAllocSize = allocSize;
     logPrint(logEventType, mallocFail, NULL);
 }
 
@@ -137,7 +143,7 @@ void removeNewLines(char *input);
 
 inline void initLogFile()
 {
-  if (initLogDone) return;
+  if (initLogDone && !preinit) return;
   _initLogFile();
 }
 

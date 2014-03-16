@@ -202,7 +202,7 @@ static void *tryMalloc(size_t size)
     char* hprof_file = NULL;
     char prop_value[PROPERTY_VALUE_MAX] = {'\0'};
     
-    logPrint(LOG_TRY_MALLOC, false);
+    logPrint(LOG_TRY_MALLOC, false, size, 0);
       
      // log history
      if (policyNumber >= 4) {
@@ -221,13 +221,13 @@ static void *tryMalloc(size_t size)
 
     ptr = dvmHeapSourceAlloc(size);
     if (ptr != NULL) {
-        logPrint(LOG_TRY_MALLOC, false);
+        logPrint(LOG_TRY_MALLOC, false, size, 0);
         return ptr;
     }
    
      
      // malloc failed so log it if we didn't already
-     logPrint(LOG_TRY_MALLOC, true);
+     logPrint(LOG_TRY_MALLOC, true, size, 0);
      
      // if we're running MI policy then
      // check if heap should grow instead
@@ -235,15 +235,15 @@ static void *tryMalloc(size_t size)
      if (policyNumber != 1) {
          
          //ALOGD("Robust Policy Check Malloc Fail");
-         // if we're running MI2a set the threshold
-         if (policyNumber >= 4) {
+         // if we're running adaptive set the threshold
+         if (adaptive) {
              setThreshold();
          }
          ptr = dvmHeapSourceAllocAndGrow(size);
          
          // MI policies actively schedule so they should finish here if allocation is successful
-         if ((policyNumber >= 4) && (ptr != NULL)) {
-             logPrint(LOG_TRY_MALLOC, true);
+         if ((adaptive) && (ptr != NULL)) {
+             logPrint(LOG_TRY_MALLOC, true, size, 0);
              //ALOGD("Robust Policy Check Malloc Fail Grow");
              return ptr;
          }
@@ -252,7 +252,7 @@ static void *tryMalloc(size_t size)
          // return, otherwise run a GC
          u8 elapsedSinceGC = dvmGetRTCTimeMsec() - lastGCTime;
          if ((elapsedSinceGC < minGCTime) && (ptr != NULL)) {
-             logPrint(LOG_TRY_MALLOC, true);
+             logPrint(LOG_TRY_MALLOC, true, size, 0);
              //ALOGD("Robust Policy Check Malloc Fail Below Threshold Time");
              return ptr;
          }
@@ -281,7 +281,7 @@ static void *tryMalloc(size_t size)
 
     ptr = dvmHeapSourceAlloc(size);
     if (ptr != NULL) {
-        logPrint(LOG_TRY_MALLOC, true);
+        logPrint(LOG_TRY_MALLOC, true, size, 0);
         return ptr;
     }
 
@@ -300,7 +300,7 @@ static void *tryMalloc(size_t size)
         LOGI_HEAP("Grow heap (frag case) to "
                 "%zu.%03zuMB for %zu-byte allocation",
                 FRACTIONAL_MB(newHeapSize), size);
-        logPrint(LOG_TRY_MALLOC, true);
+        logPrint(LOG_TRY_MALLOC, true, size, 0);
         return ptr;
     }
 
@@ -316,7 +316,7 @@ static void *tryMalloc(size_t size)
     gcForMalloc(true);
     ptr = dvmHeapSourceAllocAndGrow(size);
     if (ptr != NULL) {
-        logPrint(LOG_TRY_MALLOC, true);
+        logPrint(LOG_TRY_MALLOC, true, size, 0);
         return ptr;
     }
 //TODO: maybe wait for finalizers and try one last time
@@ -365,7 +365,7 @@ static void *tryMalloc(size_t size)
         }
     }
 
-    logPrint(LOG_TRY_MALLOC, true);
+    logPrint(LOG_TRY_MALLOC, true, size, 0);
     return NULL;
 }
 
@@ -835,7 +835,17 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 
     // update last GC Time
     lastGCTime = dvmGetRTCTimeMsec();
-    
+
+	// update the threshold if necessary
+	if (resizeThreshold && thresholdOnGC) {
+		int thresholdTmp = threshold + (thresholdOnGC - (currFootprint - currAllocated));
+		if (thresholdTmp >  1024) {
+			threshold = thresholdTmp;
+		} else {
+			threshold = 1024;
+		}
+	}
+	thresholdOnGC = (currFootprint - currAllocated);
     /* Write GC info to log if the log's ready*/
     logPrint(LOG_GC, spec, numBytesFreed, numObjectsFreed);
     

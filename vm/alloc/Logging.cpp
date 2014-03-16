@@ -22,7 +22,7 @@
 
 // comment out to remove 
 // logcat debugging s
-//#define snappyDebugging
+#define snappyDebugging
 
 int tryMallocSequenceNumber = 0;
 u8 currentMallocTime = 0;
@@ -32,9 +32,12 @@ bool threshSet;
 struct timespec startTime;
 int mallocsDone;
 char thisProcessName[80];
+char logPrefix[80];	// for the apps that don't have sdcard access
 char deviceName[25];
 int inGC;
+int preDone = 0; // if dex or sysopt is done initing
 FILE* fileTest = NULL;
+FILE* others = NULL;
 FILE* notLogged = NULL;
 
 int testTime(void);
@@ -50,71 +53,111 @@ struct GcPolSpec {
         unsigned int minTime;
         /* number of 100ms increments keep size log */
         unsigned int intervals;
+		/* is this an adaptive policy */
+		unsigned int adaptive;
+		/* resize threshold on GC */
+		unsigned int resizeThreshold;
 };
 
 static GcPolSpec stockPol = {
-  "baseline",
-  1,
-  0,
-  0
+	"baseline",
+	1,		// Policy Number
+	0,		// minGCTime
+	0,		// 100ms intervals for histogram
+	0,		// adaptive
+	0		// resize threshold on GC
 };
 GcPolSpec *stock = &stockPol;
 
 static GcPolSpec GcPolMI2 = {
-  "MI2",
-  2,
-  2000,
-  0
+	"MI2",
+	2,		// Policy Number
+	2000,	// minGCTime
+	0,		// 100ms intervals for histogram
+	0,		// adaptive
+	0		// resize threshold on GC
 };
 
 GcPolSpec *MI2 = &GcPolMI2;
 
 static GcPolSpec GcPolMI2S = {
-  "MI2S",
-  3,
-  2000,
-  5
+	"MI2S",
+	3,		// Policy Number
+	2000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	0,		// adaptive
+	0		// resize threshold on GC
 };
 
 GcPolSpec *MI2S = &GcPolMI2S;
 
 static GcPolSpec GcPolMI2A = {
-  "MI2A",
-  4,
-  2000,
-  5
+	"MI2A",
+	4,		// Policy Number
+	2000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	1,		// adaptive
+	0		// resize threshold on GC
 };
 
 GcPolSpec *MI2A = &GcPolMI2A;
 
 static GcPolSpec GcPolMI2AE = {
-  "MI2AE",
-  5,
-  2000,
-  5
+	"MI2AE",
+	5,		// Policy Number
+	2000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	1,		// adaptive
+	0		// resize threshold on GC
 };
 
 GcPolSpec *MI2AE = &GcPolMI2AE;
 
 static GcPolSpec GcPolMI2AI = {
-  "MI2AI",
-  6,
-  2000,
-  5
+	"MI2AI",
+	6,		// Policy Number
+	2000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	1,		// adaptive
+	0		// resize threshold on GC
 };
 
 GcPolSpec *MI2AI = &GcPolMI2AI;
 
 static GcPolSpec GcPolMI1AI = {
-  "MI1AI",
-  7,
-  1000,
-  5
+	"MI1AI",
+	7,		// Policy Number
+	1000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	1,		// adaptive
+	0		// resize threshold on GC
 };
 
 GcPolSpec *MI1AI = &GcPolMI1AI;
 
-const GcPolSpec policies[NUM_POLICIES] = {stockPol, GcPolMI2, GcPolMI2S, GcPolMI2A, GcPolMI2AE, GcPolMI2AI, GcPolMI1AI};
+static GcPolSpec GcPolMI2AD = {
+	"MI2AD",
+	8,		// Policy Number
+	2000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	1,		// adaptive
+	1		// resize threshold on GC
+};
+
+GcPolSpec *MI2AD = &GcPolMI2AD;
+
+static GcPolSpec GcPolMI1D = {
+	"MI1D",
+	9,		// Policy Number
+	1000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	1,		// adaptive
+	1		// resize threshold on GC
+};
+
+GcPolSpec *MI1D = &GcPolMI1D;
+
+const GcPolSpec policies[NUM_POLICIES] = {stockPol, GcPolMI2, GcPolMI2S, GcPolMI2A, GcPolMI2AE, GcPolMI2AI, GcPolMI1AI, GcPolMI2AD, GcPolMI1D};
 GcPolSpec policy;
 
 void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
@@ -368,7 +411,7 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
         case LOG_TRY_MALLOC:
                 char temp[MAX_STRING_LENGTH];
                 buildHeapEvent(beginEnd, eventName, seqNumber, temp);
-                sprintf(partialEntry, "%s,\"mallocFail\":\"%d\",\"numMallocs\":%d", temp, (int)mallocFail, mallocsDone);
+                sprintf(partialEntry, "%s,\"mallocFail\":\"%d\",\"numMallocs\":%d,\"lastAllocSize-B\":%d", temp, (int)mallocFail, mallocsDone,lastAllocSize);
                 break;
         case LOG_GC:
                 buildGCEvent(beginEnd, eventName, seqNumber, spec, partialEntry);
@@ -380,7 +423,7 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
                 break;
     }
 
-    fprintf(fileLog, "%s}\n", partialEntry);
+    fprintf(fileLog, "%s%s}\n", logPrefix, partialEntry);
     numLogEvents++;
 }
 
@@ -510,6 +553,7 @@ void _initLogFile()
     threshSet = false;
     schedGC = false;
     inGC = 0;   
+	thresholdOnGC = 0;
      
     // defaults
     // MI2A and no logging
@@ -517,6 +561,7 @@ void _initLogFile()
 
     // if we're a blacklisted process
     // skip logging
+	/* Original code that skips certain processes
     if (!strncmp(processName, "zygote",6)) {
         // zygote is where everyone's spawned so we can't turn off logging here
         #ifdef snappyDebugging
@@ -549,8 +594,31 @@ void _initLogFile()
         policyNumber = policy.policyNumber;
         minGCTime = policy.minTime;
         intervals = policy.intervals;
+		adaptive = policy.adaptive;
+		resizeThreshold = policy.resizeThreshold;		
         return;
-    }
+    }*/
+
+	// check if we're some sort of preinitialization process
+	if (!strncmp(processName, "zygote",6) || !strncmp(processName, "system_server", 6) || !strncmp(processName, "unknown", 6)
+            || !strncmp(processName, "<pre", 4) || !strncmp(processName, "dexopt", 6)) {
+
+		// if we are and we've already been initialized bail out
+		if (preinit && preDone) {
+			return;
+		}
+
+		notLogged = fopen("/sdcard/robust/notLogged.txt", "at" );
+		others = fopen("/sdcard/robust/others.txt", "at" );
+        if (notLogged != NULL) {
+            ALOGD("Robust Test file open successful");
+        } else {
+            ALOGD("Robust Log Test fail open /sdcard/robust/notLogged.txt %s",strerror(errno));
+        }
+		preinit = 1;
+	} else {
+		preinit = 0; // we're a regular process
+	}
 
     //#ifdef snappyDebugging
     ALOGD("Robust Log %s != zygote not skipping", processName);
@@ -600,6 +668,8 @@ void _initLogFile()
         policyNumber = policy.policyNumber;
         minGCTime = policy.minTime;
         intervals = policy.intervals;
+		adaptive = policy.adaptive;
+		resizeThreshold = policy.resizeThreshold;	
         logReady = true;
         return; // GC Policy file doesn't exist so we just run defaults anyway
     }
@@ -608,7 +678,7 @@ void _initLogFile()
     // MI2A and no logging
     // yes it's duplicated but the compiler 
     // misses the fact that it's above
-    policy = policies[4];
+    policy = policies[5];
     skipLogging = 1;
     
     if (polVal[0]) {
@@ -637,6 +707,8 @@ void _initLogFile()
     policyNumber = policy.policyNumber;
     minGCTime = policy.minTime;
     intervals = policy.intervals;
+	adaptive = policy.adaptive;
+	resizeThreshold = policy.resizeThreshold;	
     ALOGD("Robust Log policy Number %d", policyNumber);
         ALOGD("MinGCTime %d", minGCTime);
     
@@ -668,14 +740,26 @@ void _initLogFile()
 
     #ifdef snappyDebugging
     ALOGD("Robust Log ||%s||", fileName);
+	ALOGD("Filelog %p",fileLog);
     #endif
     fileLog = fopen(fileName, "at" );
+
+	logPrefix[0] = '\0';
+	// if we couldn't open the log for whatever reason
+	// print logs in the others catchall log
+	if (!fileLog) {
+		fileLog = others;
+		sprintf(logPrefix, "%s.txt#%llu",processName,dvmGetRTCTimeMsec());
+	}
     if (fileLog != NULL) {
         // bump our buffer log size to 12k
         setvbuf(fileLog, NULL, _IOFBF, 12287);
-        fprintf(fileLog, "\n\n@header{\"deviceName\":\"%s\",\"deviceID\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n",
-            deviceName, uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
+
+        fprintf(fileLog, "\n\n%s@header{\"deviceName\":\"%s\",\"deviceID\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n",
+            logPrefix, deviceName, uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
         logReady = true;
+		preDone = 1; // we're a preinitialization process and we should be done here
+		ALOGD("Robust Log opened file %s", fileName);
         return;
     } else {
         // all else failed
@@ -683,6 +767,7 @@ void _initLogFile()
         fflush(notLogged);
         ALOGD("Robust Log fail open %s %s", fileName,strerror(errno));
         logReady = false;
+		preDone = 1; // inits should never reach here but just in case
         return;
     }
 }
@@ -899,6 +984,7 @@ int testTime(void)
 }
 
 int skipLogging = 0;
+size_t thresholdOnGC = 0;
 int seqNumber;
 bool logReady;
 bool schedGC; // Sched GC
@@ -907,8 +993,11 @@ FILE* fileLog;
 int policyNumber;
 unsigned int minGCTime;
 unsigned int intervals;
+unsigned int adaptive;
+unsigned int resizeThreshold;
 size_t numBytesFreedLog;
 size_t objsFreed;
+size_t lastAllocSize;
 
 size_t lastRequestedSize = 0;
 //string processName;
