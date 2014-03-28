@@ -12,6 +12,7 @@
 #include <sys/time.h>
 
 #define NUM_POLICIES 9
+#define LOG_CUSTOM 0
 #define LOG_TRY_MALLOC 1
 #define LOG_GC 2
 #define LOG_WAIT_CONC_GC 3
@@ -72,6 +73,8 @@ inline void logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
 {
     _logPrint(logEventType, mallocFail, spec);
 }
+
+void logPrint(int logEventType, const char *type, const char *customString);
 
 // A few shortcut adapters
 inline void logPrint(int logEventType, const GcSpec* spec)
@@ -182,10 +185,24 @@ unsigned long getCount(int cpu);
 u8 dvmGetTotalProcessCpuTimeNsec(void);
 
 /*
+ * Get the per-thread CPU time, in nanoseconds
+ *
+ * The amount of time the thread had been executing
+ */
+u8 dvmGetTotalThreadCpuTimeNsec(void);
+
+/*
 * Per-Process CPU time, in micros
 */
 INLINE u8 dvmGetTotalProcessCpuTimeMsec(void) {
     return dvmGetTotalProcessCpuTimeNsec() / 1000000;
+}
+
+/*
+* Per-Thread CPU time, in micros
+*/
+INLINE u8 dvmGetTotalThreadCpuTimeMsec(void) {
+    return dvmGetTotalThreadCpuTimeNsec() / 1000000;
 }
 
 #endif // ROBUST_LOG_H_

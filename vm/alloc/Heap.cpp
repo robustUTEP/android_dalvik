@@ -560,6 +560,8 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     size_t currAllocated, currFootprint;
     size_t percentFree;
     int oldThreadPriority = INT_MAX;
+	char *tmpBuf;
+	tmpBuf = (char *)malloc(128);
     
     // check if we're doing MI2A* or MI2E
     // on MI2A* we ignore explicits on MI2AE
@@ -746,6 +748,13 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 
     LOGD_HEAP("Done.");
 
+	string test;
+	currAllocated = dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, NULL, 0);
+    currFootprint = dvmHeapSourceGetValue(HS_FOOTPRINT, NULL, 0);
+	snprintf(tmpBuf,127 ,",\"currAlloc-0\":%u,\"currFootprint-0\":%u",currAllocated,currFootprint);
+	test = tmpBuf;	
+	logPrint(LOG_CUSTOM,"preGCResize",(char*)tmpBuf);
+
     /* Now's a good time to adjust the heap size, since
      * we know what our utilization is.
      *
@@ -756,6 +765,9 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 
     currAllocated = dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, NULL, 0);
     currFootprint = dvmHeapSourceGetValue(HS_FOOTPRINT, NULL, 0);
+	snprintf(tmpBuf,127,",\"currAlloc-0\":%u,\"currFootprint-0\":%u",currAllocated,currFootprint);
+	test = tmpBuf;
+	logPrint(LOG_CUSTOM,"postGCResize",(char*)tmpBuf);
 
     dvmMethodTraceGCEnd();
     LOGV_HEAP("GC finished");
@@ -845,7 +857,13 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 			threshold = 1024;
 		}
 	}
+	
 	thresholdOnGC = (currFootprint - currAllocated);
+	snprintf(tmpBuf,127,"\"threshreg\":%d,\"threshSigned\":%d",
+			threshold + (thresholdOnGC - (currFootprint - currAllocated)),
+			(long)threshold + ((long)thresholdOnGC - ((long)currFootprint - (long)currAllocated)));
+	logPrint(LOG_CUSTOM, "GCCalc",(char*)tmpBuf);
+
     /* Write GC info to log if the log's ready*/
     logPrint(LOG_GC, spec, numBytesFreed, numObjectsFreed);
     

@@ -20,9 +20,11 @@
 #include "alloc/Logging.h"
 #include "sched.h"
 
+#define BUILD_ID "032714-2130"
+
 // comment out to remove 
 // logcat debugging s
-#define snappyDebugging
+//#define snappyDebugging 0
 
 int tryMallocSequenceNumber = 0;
 u8 currentMallocTime = 0;
@@ -333,6 +335,7 @@ char* buildBasicEvent(const char* beginEnd,const char* eventName, int seqNumber,
 {
     u8 wcTime = dvmGetRTCTimeMsec();
     u8 appTime = dvmGetTotalProcessCpuTimeMsec();
+	u8 threadTime = dvmGetTotalThreadCpuTimeMsec();
     unsigned long count;
     
     // get the cpu we're running on
@@ -342,8 +345,8 @@ char* buildBasicEvent(const char* beginEnd,const char* eventName, int seqNumber,
     count = getCount(cpu);
     
 
-    sprintf(output, "@%s%s{\"seqNum\":%d,\"cpu\":%d,\"count\":%lu,\"wcTime-ms\":%llu,\"appTime-ms\":%llu,\"priority\":%d",
-        beginEnd, eventName, seqNumber, cpu, count, wcTime, appTime, os_getThreadPriorityFromSystem());
+    sprintf(output, "@%s%s{\"seqNum\":%d,\"cpu\":%d,\"count\":%lu,\"wcTime-ms\":%llu,\"appTime-ms\":%llu,\"threadTime-ms\":%llu,\"priority\":%d",
+        beginEnd, eventName, seqNumber, cpu, count, wcTime, appTime, threadTime, os_getThreadPriorityFromSystem());
     return output;
 }
 
@@ -387,6 +390,20 @@ void buildGCEvent(const char* beginEnd,const char* eventName, int seqNumber, con
 
     sprintf(output, "%s,\"GCType\":\"%s\",\"cpuSpeed-Hz\":\"%s\",\"rootScanTime\":%llu,\"bytesFreed-kb\":%f,\"objectsFreed\":%u",
         partial, spec->reason, cpuSpeed, rootScanTime, numBytesFreedLog / 1024.0, objsFreed);
+}
+
+/*
+ * Writes a nonstandard log event with a custom message
+ */ 
+void logPrint(int logEventType, const char *eventName, const char *customString)
+{
+	char partialEntry[MAX_STRING_LENGTH];
+
+	if (!fileLog)
+		return;
+	buildBasicEvent("", eventName, seqNumber++, partialEntry);
+	fprintf(fileLog, "%s%s}\n", partialEntry, customString);
+	return;
 }
 
 /*
@@ -641,7 +658,7 @@ void _initLogFile()
     removeNewLines(timeStart);        
 
     char polFile[] = "/sdcard/robust/GCPolicy.txt";
-    char polVal[2];
+    char polVal[5];
     char uniqName[64];
 
     // check and see if we have GC policy
@@ -755,7 +772,7 @@ void _initLogFile()
         // bump our buffer log size to 12k
         setvbuf(fileLog, NULL, _IOFBF, 12287);
 
-        fprintf(fileLog, "\n\n%s@header{\"deviceName\":\"%s\",\"deviceID\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu}\n",
+        fprintf(fileLog, "\n\n%s@header{\"deviceName\":\"%s\",\"deviceID\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu,\"Build_ID\":\""BUILD_ID"\"}\n",
             logPrefix, deviceName, uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
         logReady = true;
 		preDone = 1; // we're a preinitialization process and we should be done here
@@ -866,6 +883,22 @@ u8 dvmGetTotalProcessCpuTimeNsec(void)
 #ifdef HAVE_POSIX_CLOCKS
     struct timespec now;
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &now);
+    return (u8)now.tv_sec*1000000000LL + now.tv_nsec;
+#else
+    return (u8) -1;
+#endif
+}
+
+/*
+ * Get the per-thread CPU time, in nanoseconds
+ *
+ * The amount of time the thread had been executing
+ */
+u8 dvmGetTotalThreadCpuTimeNsec(void)
+{
+#ifdef HAVE_POSIX_CLOCKS
+    struct timespec now;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now);
     return (u8)now.tv_sec*1000000000LL + now.tv_nsec;
 #else
     return (u8) -1;
