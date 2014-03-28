@@ -859,7 +859,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 	}
 	
 	thresholdOnGC = (currFootprint - currAllocated);
-	snprintf(tmpBuf,127,"\"threshreg\":%d,\"threshSigned\":%d",
+	snprintf(tmpBuf,127,"\"threshreg\":%d,\"threshSigned\":%ld",
 			threshold + (thresholdOnGC - (currFootprint - currAllocated)),
 			(long)threshold + ((long)thresholdOnGC - ((long)currFootprint - (long)currAllocated)));
 	logPrint(LOG_CUSTOM, "GCCalc",(char*)tmpBuf);
