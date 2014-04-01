@@ -20,7 +20,7 @@
 #include "alloc/Logging.h"
 #include "sched.h"
 
-#define BUILD_ID "032714-2130"
+#define BUILD_ID "033114-2130"
 
 // comment out to remove 
 // logcat debugging s
@@ -159,7 +159,29 @@ static GcPolSpec GcPolMI1D = {
 
 GcPolSpec *MI1D = &GcPolMI1D;
 
-const GcPolSpec policies[NUM_POLICIES] = {stockPol, GcPolMI2, GcPolMI2S, GcPolMI2A, GcPolMI2AE, GcPolMI2AI, GcPolMI1AI, GcPolMI2AD, GcPolMI1D};
+static GcPolSpec GcPolMMI2AD = {
+	"MMI2AD",
+	10,		// Policy Number
+	2000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	1,		// adaptive
+	1		// resize threshold on GC
+};
+
+GcPolSpec *MMI2AD = &GcPolMMI2AD;
+
+static GcPolSpec GcPolMMI1D = {
+	"MMI1D",
+	11,		// Policy Number
+	1000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	1,		// adaptive
+	1		// resize threshold on GC
+};
+
+GcPolSpec *MMI1D = &GcPolMMI1D;
+
+const GcPolSpec policies[NUM_POLICIES] = {stockPol, GcPolMI2, GcPolMI2S, GcPolMI2A, GcPolMI2AE, GcPolMI2AI, GcPolMI1AI, GcPolMI2AD, GcPolMI1D, GcPolMMI2AD, GcPolMMI1D};
 GcPolSpec policy;
 
 void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
@@ -256,7 +278,7 @@ void logMalloc(bool mallocFail)
             beginOrEnd = "begin";
             thisMallocSeqNumb = seqNumber++;
             logStart = false;
-            mallocsDone = (maxMallocs * numChecks) + numMallocs;
+            mallocsDone += numMallocs;
             writeLogEvent(LOG_TRY_MALLOC, beginOrEnd.c_str(), "TryMalloc", thisMallocSeqNumb, NULL, true);
             //lastMallocTime = currentMallocTime;
             numMallocs = 0;
@@ -265,26 +287,23 @@ void logMalloc(bool mallocFail)
         if (numMallocs > maxMallocs) {
             u8 currentMallocTime = dvmGetRTCTimeMsec();
             numChecks++;
+			//maxMallocs = ((numMallocs >> 4)  * (100.0 / (((float)currentMallocTime - (float)lastMallocTime) + 1.0))) + 50.0;
+			mallocsDone +=  numMallocs;
+            numMallocs = 0;
             if (currentMallocTime - lastMallocTime > 100) {
                 beginOrEnd = "begin";
                 thisMallocSeqNumb = seqNumber++;
                 logStart = false;
-                mallocsDone = maxMallocs * numChecks;
                 #ifdef snappyDebugging
                 ALOGD("Robust maxMallocs %d, numChecks %d", maxMallocs, numChecks);
                 #endif
                 writeLogEvent(LOG_TRY_MALLOC, beginOrEnd.c_str(), "TryMalloc", thisMallocSeqNumb, NULL);
                 
                 lastMallocTime = currentMallocTime;
-                maxMallocs = numChecks * maxMallocs / 10;
-                // under certain (rare) circumstances max can go very low
-                // this is to prevent that
-                if (maxMallocs < 100) {
-                    maxMallocs = 100;
-                }
+				maxMallocs = (mallocsDone >> 4) + 50;
                 numChecks = 0;
+				mallocsDone = 0;
             }
-            numMallocs = 0;
         }
         numMallocs++;
     }
@@ -452,9 +471,10 @@ void scheduleConcurrentGC()
     // only adaptive policies schedule concurrent GC
     if (policyNumber >= 4) {
         u8 timeSinceLastGC = dvmGetRTCTimeMsec() - lastGCTime;
+		u8 timeSinceLastGCCPU = dvmGetTotalProcessCpuTimeMsec() - lastGCCPUTime;
 
         // check and see if we're at the min time from a concurrent GC
-        if (timeSinceLastGC > minGCTime)        {
+        if (((timeSinceLastGC > minGCTime) && policyNumber < 9) || ((timeSinceLastGC > minGCTime) && (timeSinceLastGCCPU > minGCTime))) {
 
             #ifdef snappyDebugging
             ALOGD("Robust Schedule Concurrent Min Time Complete");
@@ -473,6 +493,7 @@ void scheduleConcurrentGC()
             // to prevent succesive calls from succeding
             // if gc doesn't complete soon
             lastGCTime = dvmGetRTCTimeMsec();
+			lastGCCPUTime = dvmGetTotalProcessCpuTimeMsec();
             dvmInitConcGC();
             }
         }
@@ -497,6 +518,7 @@ void saveHistory()
     // often otherwise sys slows down.
     static int timesCalled = 0; // # of times called
     static int callsThreshold = 500; // threshold before we check time
+	static int totalCalled = 0;
     static u8 lastSaveTime = 0;
     u8 currentTime;
     timesCalled++;
@@ -504,6 +526,11 @@ void saveHistory()
     if (timesCalled > callsThreshold) {
         // check if its been 1/10th of a second
         currentTime = dvmGetRTCTimeMsec();
+
+		// set the call threshold to 1/8 of what happened  + 50
+        //callsThreshold = ((timesCalled >> 4) * (100.0 / ((float)currentTime - (float)lastSaveTime) )) + 10.0;           
+        timesCalled = 0;
+		totalCalled += timesCalled;
         if ((currentTime - lastSaveTime) > 100) {
         
             #ifdef snappyDebugging
@@ -522,12 +549,10 @@ void saveHistory()
             freeHistory[currInterval] = heapsFootprint[0] - heapsAlloc[0];
             currInterval = (currInterval + 1) % intervals;
             
-            // set the call threshold to 1/8 of what happened  + 100
-            callsThreshold = (timesCalled >> 8) + 100;           
-            timesCalled = 0;
-            
             // set this time as the last save time
             lastSaveTime = currentTime;
+			callsThreshold = (totalCalled >> 4) + 50;
+			totalCalled = 0;
         }
    }
    #ifdef snappyDebugging
@@ -1037,3 +1062,4 @@ size_t lastRequestedSize = 0;
 int freeHistory[10]; // histogram
 size_t threshold; // threshold for starting concurrent GC
 u8 lastGCTime = 0; // for scheduling GCs
+u8 lastGCCPUTime = 0;

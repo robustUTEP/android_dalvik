@@ -251,11 +251,17 @@ static void *tryMalloc(size_t size)
          // if it's been less than the min GC time
          // return, otherwise run a GC
          u8 elapsedSinceGC = dvmGetRTCTimeMsec() - lastGCTime;
-         if ((elapsedSinceGC < minGCTime) && (ptr != NULL)) {
+		 u8 elapsedCPUSinceGC = dvmGetTotalProcessCpuTimeMsec() - lastGCCPUTime;
+         if ((policyNumber < 10) && (elapsedSinceGC < minGCTime) && (ptr != NULL)) {
              logPrint(LOG_TRY_MALLOC, true, size, 0);
              //ALOGD("Robust Policy Check Malloc Fail Below Threshold Time");
              return ptr;
-         }
+         } else if ((elapsedCPUSinceGC < minGCTime) && (elapsedSinceGC < minGCTime) && (ptr != NULL)) {
+             logPrint(LOG_TRY_MALLOC, true, size, 0);
+             //ALOGD("Robust Policy Check Malloc Fail Below Threshold Time");
+             return ptr;
+		 }			
+			
          
         //ALOGD("Robust Policy Check Malloc Fail GC");        
      }
@@ -847,6 +853,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 
     // update last GC Time
     lastGCTime = dvmGetRTCTimeMsec();
+	lastGCCPUTime = dvmGetTotalThreadCpuTimeMsec();
 
 	// update the threshold if necessary
 	if (resizeThreshold && thresholdOnGC) {
@@ -859,7 +866,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 	}
 	
 	thresholdOnGC = (currFootprint - currAllocated);
-	snprintf(tmpBuf,127,"\"threshreg\":%d,\"threshSigned\":%ld",
+	snprintf(tmpBuf,127,",\"threshreg\":%d,\"threshSigned\":%ld",
 			threshold + (thresholdOnGC - (currFootprint - currAllocated)),
 			(long)threshold + ((long)thresholdOnGC - ((long)currFootprint - (long)currAllocated)));
 	logPrint(LOG_CUSTOM, "GCCalc",(char*)tmpBuf);

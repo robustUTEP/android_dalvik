@@ -11,7 +11,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define NUM_POLICIES 9
+#define NUM_POLICIES 11
 #define LOG_CUSTOM 0
 #define LOG_TRY_MALLOC 1
 #define LOG_GC 2
@@ -41,6 +41,7 @@ extern string processName;
 extern int freeHistory[10]; // histogram
 extern size_t threshold; // threshold for starting concurrent GC
 extern u8 lastGCTime; // for scheduling GCs
+extern u8 lastGCCPUTime; // ditto just cpu time instead
 static int initLogDone;
 static int preinit = 0; // if we're an initialization process (ie zygote or sys server)
 extern size_t numBytesFreedLog;
