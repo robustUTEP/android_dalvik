@@ -4,6 +4,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <unistd.h>
+//#include <inttypes.h>
 
 #include <errno.h>
 
@@ -20,15 +21,24 @@
 #include "alloc/Logging.h"
 #include "sched.h"
 
-#define BUILD_ID "033114-2130"
+#define BUILD_ID "042414-2130-logOthers-noDalvik"
+#define CONCURRENT_START_DEFAULT (128 << 10)
+#define NUM_GC_AVERAGES 10
 
 // comment out to remove 
 // logcat debugging s
-//#define snappyDebugging 0
+
+//#define snappyDebugging 1
+//#define snappyDebuggingHistory 1
+//#define logWriteTime 1
+#define logOthers 1
+#define dontLogAll 1
 
 int tryMallocSequenceNumber = 0;
 u8 currentMallocTime = 0;
 u8 rootScanTime = 0;
+u8 gcStartTime; // start time of the last GC
+u8 lastExhaustion;
 int currInterval = 0;
 bool threshSet;
 struct timespec startTime;
@@ -38,11 +48,16 @@ char logPrefix[80];	// for the apps that don't have sdcard access
 char deviceName[25];
 int inGC;
 int preDone = 0; // if dex or sysopt is done initing
+struct timespec minSleepTime;
 FILE* fileTest = NULL;
 FILE* others = NULL;
 FILE* notLogged = NULL;
 
 int testTime(void);
+char fileName[128];
+
+u8 gcAverage[10] = {0,0,0,0,0,0,0,0,0,0};
+int currGCAverage;
 
 //GC Policies
 //typedef struct GcPolSpec GcPolSpec
@@ -59,6 +74,8 @@ struct GcPolSpec {
 		unsigned int adaptive;
 		/* resize threshold on GC */
 		unsigned int resizeThreshold;
+		/* disable heap resize on GC */
+		bool resizeOnGC;
 };
 
 static GcPolSpec stockPol = {
@@ -67,7 +84,8 @@ static GcPolSpec stockPol = {
 	0,		// minGCTime
 	0,		// 100ms intervals for histogram
 	0,		// adaptive
-	0		// resize threshold on GC
+	0,		// resize threshold on GC
+	true	// resize heap on gc
 };
 GcPolSpec *stock = &stockPol;
 
@@ -77,9 +95,9 @@ static GcPolSpec GcPolMI2 = {
 	2000,	// minGCTime
 	0,		// 100ms intervals for histogram
 	0,		// adaptive
-	0		// resize threshold on GC
+	0,		// resize threshold on GC
+	true	// resize heap on gc
 };
-
 GcPolSpec *MI2 = &GcPolMI2;
 
 static GcPolSpec GcPolMI2S = {
@@ -88,7 +106,8 @@ static GcPolSpec GcPolMI2S = {
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
 	0,		// adaptive
-	0		// resize threshold on GC
+	0,		// resize threshold on GC
+	true	// resize heap on gc
 };
 
 GcPolSpec *MI2S = &GcPolMI2S;
@@ -99,7 +118,8 @@ static GcPolSpec GcPolMI2A = {
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
-	0		// resize threshold on GC
+	0,		// resize threshold on GC
+	true	// resize heap on gc
 };
 
 GcPolSpec *MI2A = &GcPolMI2A;
@@ -110,7 +130,8 @@ static GcPolSpec GcPolMI2AE = {
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
-	0		// resize threshold on GC
+	0,		// resize threshold on GC
+	true	// resize heap on gc
 };
 
 GcPolSpec *MI2AE = &GcPolMI2AE;
@@ -121,7 +142,8 @@ static GcPolSpec GcPolMI2AI = {
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
-	0		// resize threshold on GC
+	0,		// resize threshold on GC
+	true	// resize heap on gc
 };
 
 GcPolSpec *MI2AI = &GcPolMI2AI;
@@ -132,7 +154,8 @@ static GcPolSpec GcPolMI1AI = {
 	1000,	// minGCTime
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
-	0		// resize threshold on GC
+	0,		// resize threshold on GC
+	true	// resize heap on gc
 };
 
 GcPolSpec *MI1AI = &GcPolMI1AI;
@@ -143,7 +166,8 @@ static GcPolSpec GcPolMI2AD = {
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
-	1		// resize threshold on GC
+	1,		// resize threshold on GC
+	true	// resize heap on gc
 };
 
 GcPolSpec *MI2AD = &GcPolMI2AD;
@@ -154,7 +178,8 @@ static GcPolSpec GcPolMI1D = {
 	1000,	// minGCTime
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
-	1		// resize threshold on GC
+	1,		// resize threshold on GC
+	true	// resize heap on gc
 };
 
 GcPolSpec *MI1D = &GcPolMI1D;
@@ -165,10 +190,9 @@ static GcPolSpec GcPolMMI2AD = {
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
-	1		// resize threshold on GC
+	1,		// resize threshold on GC
+	true	// resize heap on gc
 };
-
-GcPolSpec *MMI2AD = &GcPolMMI2AD;
 
 static GcPolSpec GcPolMMI1D = {
 	"MMI1D",
@@ -176,12 +200,48 @@ static GcPolSpec GcPolMMI1D = {
 	1000,	// minGCTime
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
-	1		// resize threshold on GC
+	0,		// resize threshold on GC
+	true	// resize heap on gc
 };
 
 GcPolSpec *MMI1D = &GcPolMMI1D;
 
-const GcPolSpec policies[NUM_POLICIES] = {stockPol, GcPolMI2, GcPolMI2S, GcPolMI2A, GcPolMI2AE, GcPolMI2AI, GcPolMI1AI, GcPolMI2AD, GcPolMI1D, GcPolMMI2AD, GcPolMMI1D};
+static GcPolSpec GcPolRT1 = {
+	"RT1",
+	12,		// Policy Number
+	2000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	1,		// adaptive
+	1,		// resize threshold on GC
+	false	// resize heap on gc
+};
+GcPolSpec *RT1 = &GcPolRT1;
+
+static GcPolSpec GcPolRT2 = {
+	"RT2",
+	13,		// Policy Number
+	1000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	1,		// adaptive
+	0,		// resize threshold on GC
+	false	// resize heap on gc
+};
+
+GcPolSpec *RT2 = &GcPolRT2;
+
+const GcPolSpec policies[NUM_POLICIES] = {stockPol, 
+										  GcPolMI2, 
+										  GcPolMI2S, 
+										  GcPolMI2A, 
+										  GcPolMI2AE, 
+										  GcPolMI2AI, 
+										  GcPolMI1AI, 
+										  GcPolMI2AD, 
+										  GcPolMI1D, 
+										  GcPolMMI2AD, 
+										  GcPolMMI1D, 
+										  GcPolRT1, 
+										  GcPolRT2};
 GcPolSpec policy;
 
 void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
@@ -201,11 +261,11 @@ void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
         #endif
         return;
     }
-
+	
     if (fileLog == NULL) {
-        #ifdef snappyDebugging
+        //#ifdef snappyDebugging
         ALOGD("GC Logging file closed after succesful open, assertion would have failed");
-        #endif
+        //#endif
         return;
     }
 
@@ -241,10 +301,11 @@ void logGC(const GcSpec* spec)
             beginOrEnd = "begin";
             thisGCSeqNumb = seqNumber++;
             logStage = 1;
+			rootScanTime = 0;
             break;
         case 1:
             logStage = 2;
-            rootScanTime = dvmGetTotalProcessCpuTimeMsec();
+            rootScanTime = dvmGetTotalThreadCpuTimeMsec();
             return;
         default:
             beginOrEnd = "end";
@@ -421,7 +482,7 @@ void logPrint(int logEventType, const char *eventName, const char *customString)
 	if (!fileLog)
 		return;
 	buildBasicEvent("", eventName, seqNumber++, partialEntry);
-	fprintf(fileLog, "%s%s}\n", partialEntry, customString);
+	fprintf(fileLog, "%s%s%s}\n", logPrefix, partialEntry, customString);
 	return;
 }
 
@@ -432,6 +493,16 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
 {
     char partialEntry[MAX_STRING_LENGTH];
     static int numLogEvents = 0;
+//	static int numWrites = 0;
+	#ifdef logWriteTime
+	char before[256];
+	char after[256];
+	u8 beforeWrite;
+	u8 afterWrite;
+	#endif	
+	
+	//before = (char *)malloc(sizeof(char) * 256);
+	//after = (char *)malloc(sizeof(char) * 256);
 
     // to keep compiler quiet
     numLogEvents = numLogEvents;
@@ -440,7 +511,7 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
     if (numLogEvents == 20) {
         fflush(fileLog);
         numLogEvents = 0;
-        }
+    }
 
     switch (eventType)
     {
@@ -459,8 +530,36 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
                 break;
     }
 
+	#ifdef logWriteTime
+	getCPUStats(before);
+	beforeWrite = dvmGetRTCTimeMsec();
+	#endif
     fprintf(fileLog, "%s%s}\n", logPrefix, partialEntry);
-    numLogEvents++;
+	#ifdef logWriteTime
+	afterWrite = dvmGetRTCTimeMsec();
+	getCPUStats(after);
+	fprintf(fileLog, "@writeBench{\"startTime\":%llu,\"endTime\":%llu,\"cpuStatsBefore\":\"%s\",\"cpuStatsAfter\":\"%s\"}\n",
+			beforeWrite,
+			afterWrite,
+			before,
+			after);
+	#endif
+	
+	// every so often we need to close and open
+	// the file to clear the attic
+//	numWrites++;
+//	if (numWrites > 100) {
+
+//		if ((fileLog != others) && fileLog) {
+//				fclose(fileLog);
+//				fileLog = NULL;
+//		}
+//		if (fileLog == NULL) {
+//			fileLog = fopen(fileName,"at");
+//		}
+//		numWrites = 0;
+//	}
+	numLogEvents++;
 }
 
 void scheduleConcurrentGC()
@@ -474,7 +573,7 @@ void scheduleConcurrentGC()
 		u8 timeSinceLastGCCPU = dvmGetTotalProcessCpuTimeMsec() - lastGCCPUTime;
 
         // check and see if we're at the min time from a concurrent GC
-        if (((timeSinceLastGC > minGCTime) && policyNumber < 9) || ((timeSinceLastGC > minGCTime) && (timeSinceLastGCCPU > minGCTime))) {
+        if (((timeSinceLastGC > minGCTime) && policyNumber < 9) || ((timeSinceLastGC > minGCTime) && (timeSinceLastGCCPU > (minGCTime / 2)))) {
 
             #ifdef snappyDebugging
             ALOGD("Robust Schedule Concurrent Min Time Complete");
@@ -509,7 +608,7 @@ void scheduleConcurrentGC()
 
 void saveHistory()
 {
-    #ifdef snappyDebugging
+    #ifdef snappyDebuggingHistory
     ALOGD("Robust Saving History");
     #endif 
 
@@ -520,6 +619,7 @@ void saveHistory()
     static int callsThreshold = 500; // threshold before we check time
 	static int totalCalled = 0;
     static u8 lastSaveTime = 0;
+	strcpy(fileName,"./");
     u8 currentTime;
     timesCalled++;
     
@@ -533,7 +633,7 @@ void saveHistory()
 		totalCalled += timesCalled;
         if ((currentTime - lastSaveTime) > 100) {
         
-            #ifdef snappyDebugging
+            #ifdef snappyDebuggingHistory
             ALOGD("Robust Saving History Min Time Reached");
             #endif
             // and check to see if we should run a concurrent GC
@@ -555,7 +655,7 @@ void saveHistory()
 			totalCalled = 0;
         }
    }
-   #ifdef snappyDebugging
+   #ifdef snappyDebuggingHistory
    ALOGD("Robust Saving History Complete");
    #endif
 }
@@ -572,6 +672,60 @@ void setThreshold(void)
     ALOGD("Robust Setting Threshold Complete");
     #endif 
 }
+
+/*
+ * store the current gc completion time
+ */
+void storeGCTime(u8 time)
+{
+	gcAverage[currGCAverage] = time;
+	currGCAverage = (currGCAverage + 1) % NUM_GC_AVERAGES;
+}
+
+/*
+ * Computes the average of the last numIterations GCs
+ */
+u8 getGCTimeAverage(int numIterations)
+{
+	int i = 0;
+	int curr = currGCAverage;
+	u8 sum = 1;
+	u8 currTime;
+	for (i = 0; i < numIterations; i++) {
+		currTime = gcAverage[curr];
+		if (currTime > 0) {		
+			sum += gcAverage[curr];
+		}
+		curr = (curr + 1) % NUM_GC_AVERAGES;
+	}
+	return sum / numIterations;
+}
+
+/*
+ * Adjusts Threshold for ### policies
+ */
+void adjustThreshold()
+{
+	// make sure vars have been set up first
+	if (!logReady)
+		return;
+	// get freespace 500ms ago
+	size_t free500msAgo = freeHistory[(currInterval + (intervals + 1)) % intervals];
+
+	// if gc completed early bump up the
+	// threshold so an additional 20ms
+	// should elapse before gc runs
+	if (lastGCTime < lastExhaustion) {
+		threshold += (free500msAgo/25);
+	} else if (lastGCTime > lastExhaustion) {
+		setThreshold();
+	}
+	// just in case
+	if (threshold == 0) {
+		threshold = CONCURRENT_START_DEFAULT;
+	}
+}
+		
     
 /*
  * Initializes the robust logfile
@@ -594,8 +748,12 @@ void _initLogFile()
     threshold = (128 << 10);
     threshSet = false;
     schedGC = false;
+	firstExhaustSinceGC = true;
+	lastExhaustion = 0;
     inGC = 0;   
 	thresholdOnGC = 0;
+	minSleepTime.tv_sec = 0;
+	minSleepTime.tv_nsec = 2000000L; // 20ms
      
     // defaults
     // MI2A and no logging
@@ -603,7 +761,8 @@ void _initLogFile()
 
     // if we're a blacklisted process
     // skip logging
-	/* Original code that skips certain processes
+	// Original code that skips certain processes
+	#ifdef dontLogAll
     if (!strncmp(processName, "zygote",6)) {
         // zygote is where everyone's spawned so we can't turn off logging here
         #ifdef snappyDebugging
@@ -637,10 +796,11 @@ void _initLogFile()
         minGCTime = policy.minTime;
         intervals = policy.intervals;
 		adaptive = policy.adaptive;
-		resizeThreshold = policy.resizeThreshold;		
+		resizeThreshold = policy.resizeThreshold;	
+		resizeOnGC = policy.resizeOnGC;	
         return;
-    }*/
-
+    }
+	#else
 	// check if we're some sort of preinitialization process
 	if (!strncmp(processName, "zygote",6) || !strncmp(processName, "system_server", 6) || !strncmp(processName, "unknown", 6)
             || !strncmp(processName, "<pre", 4) || !strncmp(processName, "dexopt", 6)) {
@@ -654,6 +814,9 @@ void _initLogFile()
 		others = fopen("/sdcard/robust/others.txt", "at" );
         if (notLogged != NULL) {
             ALOGD("Robust Test file open successful");
+			// set the buffer for others to something fairly large
+			// since it's shared across processes
+			setvbuf(fileLog, NULL, _IOFBF, 40960);
         } else {
             ALOGD("Robust Log Test fail open /sdcard/robust/notLogged.txt %s",strerror(errno));
         }
@@ -661,6 +824,7 @@ void _initLogFile()
 	} else {
 		preinit = 0; // we're a regular process
 	}
+	#endif
 
     //#ifdef snappyDebugging
     ALOGD("Robust Log %s != zygote not skipping", processName);
@@ -712,6 +876,7 @@ void _initLogFile()
         intervals = policy.intervals;
 		adaptive = policy.adaptive;
 		resizeThreshold = policy.resizeThreshold;	
+		resizeOnGC = policy.resizeOnGC;
         logReady = true;
         return; // GC Policy file doesn't exist so we just run defaults anyway
     }
@@ -750,7 +915,8 @@ void _initLogFile()
     minGCTime = policy.minTime;
     intervals = policy.intervals;
 	adaptive = policy.adaptive;
-	resizeThreshold = policy.resizeThreshold;	
+	resizeThreshold = policy.resizeThreshold;
+	resizeOnGC = policy.resizeOnGC;	
     ALOGD("Robust Log policy Number %d", policyNumber);
         ALOGD("MinGCTime %d", minGCTime);
     
@@ -772,7 +938,6 @@ void _initLogFile()
     //LOGD("Robust Log Granularity is %llu", diff2);
 
     char baseDir[] = "/sdcard/robust/";
-    char fileName[128];
     strcpy(fileName, baseDir);
     strcat(fileName, processName);
     strcat(fileName, ".txt");
@@ -787,12 +952,14 @@ void _initLogFile()
     fileLog = fopen(fileName, "at" );
 
 	logPrefix[0] = '\0';
+	#ifdef logOthers
 	// if we couldn't open the log for whatever reason
 	// print logs in the others catchall log
 	if (!fileLog) {
 		fileLog = others;
 		sprintf(logPrefix, "%s.txt#%llu",processName,dvmGetRTCTimeMsec());
 	}
+	#endif
     if (fileLog != NULL) {
         // bump our buffer log size to 12k
         setvbuf(fileLog, NULL, _IOFBF, 12287);
@@ -837,20 +1004,20 @@ void logCPUSpeed(char* speed)
 int continousGC(const GcSpec* spec)
 {
     char baseDir[] = "/sdcard/robust/";
-    char fileName[128];
-    strcpy(fileName, baseDir);
-    strcat(fileName, thisProcessName);
-    strcat(fileName, ".gc");
+    char gcfileName[128];
+    strcpy(gcfileName, baseDir);
+    strcat(gcfileName, thisProcessName);
+    strcat(gcfileName, ".gc");
     
     // check and see if we can open
     // processName.gc if so return 1
     // else return 0
-    FILE *gcFile = fopen(fileName, "rt");
+    FILE *gcFile = fopen(gcfileName, "rt");
     while (gcFile && !inGC) {
         inGC = 1;
         fclose(gcFile);
         dvmCollectGarbageInternal(spec);
-        gcFile = fopen(fileName, "rt");
+        gcFile = fopen(gcfileName, "rt");
     }
     inGC = 0;
     return 0;
@@ -982,6 +1149,36 @@ unsigned long getCount(int cpu)
     }
 }
 
+/*
+ * Gets current cpu stats as string
+ */
+void getCPUStats(char *output) 
+{
+	static FILE* loadavgFile;
+	static FILE* cpuStats;
+	char buff[12];
+	long double a[10], b[10], c[10];
+	long double load[4];
+
+	cpuStats = fopen("/proc/stat","r");
+	loadavgFile = fopen("/proc/loadavg","r");
+	if (cpuStats) {
+		fscanf(cpuStats,"%*s %Lf %Lf %Lf %Lf %Lf %Lf %Lf %Lf %Lf %Lf",&a[0],&a[1],&a[2],&a[3],&a[4],&a[5],&a[6],&a[7],&a[8],&a[9]);
+		fscanf(cpuStats,"%*s %Lf %Lf %Lf %Lf %Lf %Lf %Lf %Lf %Lf %Lf",&b[0],&b[1],&b[2],&b[3],&b[4],&b[5],&b[6],&b[7],&b[8],&b[9]);
+		fscanf(cpuStats,"%*s %Lf %Lf %Lf %Lf %Lf %Lf %Lf %Lf %Lf %Lf",&c[0],&c[1],&c[2],&c[3],&c[4],&c[5],&c[6],&c[7],&c[8],&c[9]);
+		fclose(cpuStats);
+	}
+	if (loadavgFile) {
+		fscanf(loadavgFile,"%Lf %Lf %Lf %s", &load[0], &load[1], &load[2], buff);
+		fclose(loadavgFile);
+	}
+	sprintf(output,"cpu %Lf %Lf %Lf %Lf cpu0 %Lf %Lf %Lf %Lf cpu1 %Lf %Lf %Lf %Lf loadavg %Lf %Lf %Lf %d"
+			,a[0],a[1],a[2],a[3]
+			,b[0],b[1],b[2],b[3]
+			,c[0],c[1],c[2],c[3]
+			, load[0], load[1], load[2], buff[0] - 48);
+}
+
 // internal test function remove before release
 int testTime(void)
 {
@@ -1046,6 +1243,8 @@ size_t thresholdOnGC = 0;
 int seqNumber;
 bool logReady;
 bool schedGC; // Sched GC
+bool resizeOnGC;
+bool firstExhaustSinceGC;
 FILE* fileLog;
 //string policyName;
 int policyNumber;
@@ -1059,7 +1258,12 @@ size_t lastAllocSize;
 
 size_t lastRequestedSize = 0;
 //string processName;
-int freeHistory[10]; // histogram
+int freeHistory[10] = 
+	{CONCURRENT_START_DEFAULT,
+	 CONCURRENT_START_DEFAULT,
+	 CONCURRENT_START_DEFAULT,
+	 CONCURRENT_START_DEFAULT,
+	 CONCURRENT_START_DEFAULT}; // histogram
 size_t threshold; // threshold for starting concurrent GC
 u8 lastGCTime = 0; // for scheduling GCs
 u8 lastGCCPUTime = 0;

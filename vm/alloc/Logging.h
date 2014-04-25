@@ -11,7 +11,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define NUM_POLICIES 11
+#define NUM_POLICIES 13
 #define LOG_CUSTOM 0
 #define LOG_TRY_MALLOC 1
 #define LOG_GC 2
@@ -34,7 +34,9 @@ extern unsigned int adaptive;
 extern unsigned int resizeThreshold;
 extern FILE* fileLog;
 extern bool schedGC;
+extern bool resizeOnGC;
 extern size_t thresholdOnGC;
+extern bool firstExhaustSinceGC;
 
 extern size_t lastRequestedSize;
 extern string processName;
@@ -42,20 +44,14 @@ extern int freeHistory[10]; // histogram
 extern size_t threshold; // threshold for starting concurrent GC
 extern u8 lastGCTime; // for scheduling GCs
 extern u8 lastGCCPUTime; // ditto just cpu time instead
+extern u8 gcStartTime; // start time of the last GC
+extern u8 lastExhaustion; // last memory exhaustion time
+extern struct timespec minSleepTime;
 static int initLogDone;
 static int preinit = 0; // if we're an initialization process (ie zygote or sys server)
 extern size_t numBytesFreedLog;
 extern size_t objsFreed;
 extern size_t lastAllocSize;
-
-/*
-
-extern const GcPolSpec *stock;
-extern const GcPolSpec *MI2;
-extern const GcPolSpec *MI2A;
-extern const GcPolSpec *MI4;
-extern const GcPolSpec *MI4A;
-*/
 
 // get current RTC time
 u8 dvmGetRTCTimeNsec(void);
@@ -139,6 +135,29 @@ void saveHistory();
 */
 void setThreshold(void);
 
+/*
+ * store the current gc completion time
+ */
+void storeGCTime(u8 time);
+
+/*
+ * Computes the average of the last x GCs
+ */
+u8 getGCTimeAverage(int numIterations);
+
+/*
+ * Compute average of last 5 GCs by default
+ */
+inline u8 getGCTimeAverage(void)
+{
+	return getGCTimeAverage(5);
+}
+
+/*
+ * Adjusts threshold for xxx policy
+ */
+void adjustThreshold(void);
+
 void logMeInit(void);
 
 void removeNewLines(char *input);
@@ -205,5 +224,10 @@ INLINE u8 dvmGetTotalProcessCpuTimeMsec(void) {
 INLINE u8 dvmGetTotalThreadCpuTimeMsec(void) {
     return dvmGetTotalThreadCpuTimeNsec() / 1000000;
 }
+
+/*
+ * Gets current cpu stats as string
+ */
+void getCPUStats(char *output);
 
 #endif // ROBUST_LOG_H_

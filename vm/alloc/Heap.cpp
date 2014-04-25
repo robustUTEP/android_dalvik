@@ -203,6 +203,7 @@ static void *tryMalloc(size_t size)
     char prop_value[PROPERTY_VALUE_MAX] = {'\0'};
     
     logPrint(LOG_TRY_MALLOC, false, size, 0);
+	int i;
       
      // log history
      if (policyNumber >= 4) {
@@ -224,47 +225,109 @@ static void *tryMalloc(size_t size)
         logPrint(LOG_TRY_MALLOC, false, size, 0);
         return ptr;
     }
-   
-     
+	
+	lastExhaustion = dvmGetRTCTimeMsec();
      // malloc failed so log it if we didn't already
      logPrint(LOG_TRY_MALLOC, true, size, 0);
      
      // if we're running MI policy then
      // check if heap should grow instead
      // of running gcs
-     if (policyNumber != 1) {
+     if ((policyNumber != 1) && (policyNumber < 12)) {
          
-         //ALOGD("Robust Policy Check Malloc Fail");
-         // if we're running adaptive set the threshold
-         if (adaptive) {
-             setThreshold();
-         }
-         ptr = dvmHeapSourceAllocAndGrow(size);
-         
-         // MI policies actively schedule so they should finish here if allocation is successful
-         if ((adaptive) && (ptr != NULL)) {
-             logPrint(LOG_TRY_MALLOC, true, size, 0);
-             //ALOGD("Robust Policy Check Malloc Fail Grow");
-             return ptr;
-         }
-         
-         // if it's been less than the min GC time
-         // return, otherwise run a GC
-         u8 elapsedSinceGC = dvmGetRTCTimeMsec() - lastGCTime;
-		 u8 elapsedCPUSinceGC = dvmGetTotalProcessCpuTimeMsec() - lastGCCPUTime;
-         if ((policyNumber < 10) && (elapsedSinceGC < minGCTime) && (ptr != NULL)) {
-             logPrint(LOG_TRY_MALLOC, true, size, 0);
-             //ALOGD("Robust Policy Check Malloc Fail Below Threshold Time");
-             return ptr;
-         } else if ((elapsedCPUSinceGC < minGCTime) && (elapsedSinceGC < minGCTime) && (ptr != NULL)) {
-             logPrint(LOG_TRY_MALLOC, true, size, 0);
-             //ALOGD("Robust Policy Check Malloc Fail Below Threshold Time");
-             return ptr;
-		 }			
-			
+		//ALOGD("Robust Policy Check Malloc Fail");
+		// if we're running adaptive set the threshold
+		if (adaptive) {
+			setThreshold();
+		}
+		ptr = dvmHeapSourceAllocAndGrow(size);
+
+		// MI policies actively schedule so they should finish here if allocation is successful
+		if ((adaptive) && (ptr != NULL)) {
+			logPrint(LOG_TRY_MALLOC, true, size, 0);
+			//ALOGD("Robust Policy Check Malloc Fail Grow");
+			return ptr;
+		}
+
+		// if it's been less than the min GC time
+		// return, otherwise run a GC
+		u8 elapsedSinceGC = dvmGetRTCTimeMsec() - lastGCTime;
+		u8 elapsedCPUSinceGC = dvmGetTotalProcessCpuTimeMsec() - lastGCCPUTime;
+		if ((policyNumber < 10) && (elapsedSinceGC < minGCTime) && (ptr != NULL)) {
+			logPrint(LOG_TRY_MALLOC, true, size, 0);
+			//ALOGD("Robust Policy Check Malloc Fail Below Threshold Time");
+			return ptr;
+		} else if ((elapsedCPUSinceGC < (minGCTime / 2)) && (elapsedSinceGC < minGCTime) && (ptr != NULL)) {
+			logPrint(LOG_TRY_MALLOC, true, size, 0);
+			//ALOGD("Robust Policy Check Malloc Fail Below Threshold Time");
+			return ptr;
+		}			
+	
          
         //ALOGD("Robust Policy Check Malloc Fail GC");        
-     }
+     } else if (policyNumber >= 12) {
+		/* 
+		 * New Rate Throttling Policies algo
+		 */
+		if (firstExhaustSinceGC) {			
+			adjustThreshold();
+			firstExhaustSinceGC = false;
+		}
+
+		/*
+		 * if GC not running kick off GC, grow heap
+		 * and move on
+		 */ 
+		if (!gDvm.gcHeap->gcRunning) {
+			schedGC = true;	// allows us to schedule gc if < 2s since last
+			scheduleConcurrentGC();
+			// grow heap and move on
+			ptr = dvmHeapSourceAllocAndGrow(size);
+			if (ptr != NULL) {
+				return ptr;
+			}
+		} else {
+			/* 
+			 * GC is running
+			 * Check if we can complete within 20ms if so wait,
+			 * otherwise grow heap and move on
+			 */
+	
+			if ((dvmGetRTCTimeMsec() - gcStartTime) > (getGCTimeAverage() - 20)) {
+				// keep trying to mall every 20ms, after 20 grow heap and move one
+				i = 0;				
+				while (i < 20) {	
+					ptr = dvmHeapSourceAlloc(size);
+					if (ptr != NULL) {
+						return ptr;
+					}
+					if (!gDvm.gcHeap->gcRunning) {
+						ptr = dvmHeapSourceAllocAndGrow(size);
+						if (ptr != NULL) {
+							return ptr;
+						}
+					}
+					i += 2;
+					nanosleep(&minSleepTime, NULL);
+					
+				}	
+				// we should only reach this point if 
+				// time is over 20ms or we couldn't alloc
+				// enough space so grow and move on
+				ptr = dvmHeapSourceAllocAndGrow(size);
+				if (ptr != NULL) {
+					return ptr;
+				}
+			} else {
+				ptr = dvmHeapSourceAllocAndGrow(size);
+				if (ptr != NULL) {
+					return ptr;
+				}
+			}
+		}		
+				
+	}
+		
 
     /*
      * The allocation failed.  If the GC is running, block until it
@@ -564,6 +627,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     u4 dirtyStart = 0, dirtyEnd = 0;
     size_t numObjectsFreed, numBytesFreed;
     size_t currAllocated, currFootprint;
+	size_t currAllocatedS[2], currFootprintS[2];
     size_t percentFree;
     int oldThreadPriority = INT_MAX;
 	char *tmpBuf;
@@ -608,6 +672,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     gcHeap->gcRunning = true;
 
     rootStart = dvmGetRelativeTimeMsec();
+	gcStartTime = dvmGetRTCTimeMsec();
     ATRACE_BEGIN("GC: Threads Suspended"); // Suspend A
     dvmSuspendAllThreads(SUSPEND_FOR_GC);
 
@@ -754,12 +819,12 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 
     LOGD_HEAP("Done.");
 
-	string test;
-	currAllocated = dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, NULL, 0);
-    currFootprint = dvmHeapSourceGetValue(HS_FOOTPRINT, NULL, 0);
-	snprintf(tmpBuf,127 ,",\"currAlloc-0\":%u,\"currFootprint-0\":%u",currAllocated,currFootprint);
+	/*string test;
+	dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, currAllocatedS, 2);
+    dvmHeapSourceGetValue(HS_FOOTPRINT, currFootprintS, 2);
+	snprintf(tmpBuf,127 ,",\"currAlloc-0\":%f,\"currFootprint-0\":%f",currAllocatedS[0]/1024.0,currFootprintS[0]/1024.0);
 	test = tmpBuf;	
-	logPrint(LOG_CUSTOM,"preGCResize",(char*)tmpBuf);
+	logPrint(LOG_CUSTOM,"preGCResize",(char*)tmpBuf);*/
 
     /* Now's a good time to adjust the heap size, since
      * we know what our utilization is.
@@ -767,13 +832,18 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
      * This doesn't actually resize any memory;
      * it just lets the heap grow more when necessary.
      */
-    dvmHeapSourceGrowForUtilization();
+	if (resizeOnGC) {
+    	dvmHeapSourceGrowForUtilization();
+	}
 
-    currAllocated = dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, NULL, 0);
+	currAllocated = dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, NULL, 0);
     currFootprint = dvmHeapSourceGetValue(HS_FOOTPRINT, NULL, 0);
-	snprintf(tmpBuf,127,",\"currAlloc-0\":%u,\"currFootprint-0\":%u",currAllocated,currFootprint);
-	test = tmpBuf;
-	logPrint(LOG_CUSTOM,"postGCResize",(char*)tmpBuf);
+
+    dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, currAllocatedS, 2);
+    dvmHeapSourceGetValue(HS_FOOTPRINT, currFootprintS, 2);
+	/*snprintf(tmpBuf,127 ,",\"currAlloc-0\":%f,\"currFootprint-0\":%f",currAllocatedS[0]/1024.0,currFootprintS[0]/1024.0);
+	test = tmpBuf;	
+	logPrint(LOG_CUSTOM,"postGCResize",(char*)tmpBuf);*/
 
     dvmMethodTraceGCEnd();
     LOGV_HEAP("GC finished");
@@ -854,10 +924,14 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     // update last GC Time
     lastGCTime = dvmGetRTCTimeMsec();
 	lastGCCPUTime = dvmGetTotalThreadCpuTimeMsec();
+	firstExhaustSinceGC = true;
+
+	// update gc times
+	storeGCTime(lastGCTime - gcStartTime);
 
 	// update the threshold if necessary
 	if (resizeThreshold && thresholdOnGC) {
-		int thresholdTmp = threshold + (thresholdOnGC - (currFootprint - currAllocated));
+		int thresholdTmp = threshold + (thresholdOnGC - (currFootprintS[0] - currAllocatedS[0]));
 		if (thresholdTmp >  1024) {
 			threshold = thresholdTmp;
 		} else {
@@ -865,18 +939,16 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 		}
 	}
 	
-	thresholdOnGC = (currFootprint - currAllocated);
-	snprintf(tmpBuf,127,",\"threshreg\":%d,\"threshSigned\":%ld",
-			threshold + (thresholdOnGC - (currFootprint - currAllocated)),
-			(long)threshold + ((long)thresholdOnGC - ((long)currFootprint - (long)currAllocated)));
-	logPrint(LOG_CUSTOM, "GCCalc",(char*)tmpBuf);
+	thresholdOnGC = (currFootprintS[0] - currAllocatedS[0]);
+	/*snprintf(tmpBuf,127,",\"threshreg\":%d,\"threshSigned\":%ld",
+			threshold + (thresholdOnGC - (currFootprintS[0] - currAllocatedS[0])),
+			(long)threshold + ((long)thresholdOnGC - ((long)currFootprintS[0] - (long)currAllocatedS[0])));
+	logPrint(LOG_CUSTOM, "GCCalc",(char*)tmpBuf);*/
+
+	adjustThreshold();
 
     /* Write GC info to log if the log's ready*/
     logPrint(LOG_GC, spec, numBytesFreed, numObjectsFreed);
-    
-    // check if we exec continious GC
-    // if so we re-execute the same GC
-    //continousGC(GC_FOR_MALLOC);//spec);
 }
 
 /*
