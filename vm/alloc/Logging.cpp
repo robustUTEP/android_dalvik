@@ -21,9 +21,10 @@
 #include "alloc/Logging.h"
 #include "sched.h"
 
-#define BUILD_ID "042414-2130-logOthers-noDalvik"
+#define BUILD_ID "042914-2130-logOthers-noDalvik"
 #define CONCURRENT_START_DEFAULT (128 << 10)
 #define NUM_GC_AVERAGES 10
+#define DEFAULT_POLICY 13
 
 // comment out to remove 
 // logcat debugging s
@@ -35,6 +36,7 @@
 #define dontLogAll 1
 
 int tryMallocSequenceNumber = 0;
+unsigned short timeToAdd;
 u8 currentMallocTime = 0;
 u8 rootScanTime = 0;
 u8 gcStartTime; // start time of the last GC
@@ -76,6 +78,12 @@ struct GcPolSpec {
 		unsigned int resizeThreshold;
 		/* disable heap resize on GC */
 		bool resizeOnGC;
+		/* number of ms to push forward if GC finishes early */
+		unsigned short timeToAdd;
+		/* number of ms to wait for conc GC to complete */
+		unsigned short timeToWait;
+		/* number of times to wait before running full GC */
+		unsigned short numIterations;
 };
 
 static GcPolSpec stockPol = {
@@ -85,7 +93,10 @@ static GcPolSpec stockPol = {
 	0,		// 100ms intervals for histogram
 	0,		// adaptive
 	0,		// resize threshold on GC
-	true	// resize heap on gc
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0		// number of iterations to wait	
 };
 GcPolSpec *stock = &stockPol;
 
@@ -96,7 +107,10 @@ static GcPolSpec GcPolMI2 = {
 	0,		// 100ms intervals for histogram
 	0,		// adaptive
 	0,		// resize threshold on GC
-	true	// resize heap on gc
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0		// number of iterations to wait	
 };
 GcPolSpec *MI2 = &GcPolMI2;
 
@@ -107,7 +121,10 @@ static GcPolSpec GcPolMI2S = {
 	5,		// 100ms intervals for histogram
 	0,		// adaptive
 	0,		// resize threshold on GC
-	true	// resize heap on gc
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0		// number of iterations to wait	
 };
 
 GcPolSpec *MI2S = &GcPolMI2S;
@@ -119,7 +136,10 @@ static GcPolSpec GcPolMI2A = {
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
 	0,		// resize threshold on GC
-	true	// resize heap on gc
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0		// number of iterations to wait	
 };
 
 GcPolSpec *MI2A = &GcPolMI2A;
@@ -131,7 +151,10 @@ static GcPolSpec GcPolMI2AE = {
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
 	0,		// resize threshold on GC
-	true	// resize heap on gc
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0		// number of iterations to wait	
 };
 
 GcPolSpec *MI2AE = &GcPolMI2AE;
@@ -143,7 +166,10 @@ static GcPolSpec GcPolMI2AI = {
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
 	0,		// resize threshold on GC
-	true	// resize heap on gc
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0		// number of iterations to wait	
 };
 
 GcPolSpec *MI2AI = &GcPolMI2AI;
@@ -155,7 +181,10 @@ static GcPolSpec GcPolMI1AI = {
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
 	0,		// resize threshold on GC
-	true	// resize heap on gc
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0		// number of iterations to wait	
 };
 
 GcPolSpec *MI1AI = &GcPolMI1AI;
@@ -167,7 +196,10 @@ static GcPolSpec GcPolMI2AD = {
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
 	1,		// resize threshold on GC
-	true	// resize heap on gc
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0		// number of iterations to wait	
 };
 
 GcPolSpec *MI2AD = &GcPolMI2AD;
@@ -179,7 +211,10 @@ static GcPolSpec GcPolMI1D = {
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
 	1,		// resize threshold on GC
-	true	// resize heap on gc
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0		// number of iterations to wait	
 };
 
 GcPolSpec *MI1D = &GcPolMI1D;
@@ -191,7 +226,10 @@ static GcPolSpec GcPolMMI2AD = {
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
 	1,		// resize threshold on GC
-	true	// resize heap on gc
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0		// number of iterations to wait	
 };
 
 static GcPolSpec GcPolMMI1D = {
@@ -201,7 +239,10 @@ static GcPolSpec GcPolMMI1D = {
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
 	0,		// resize threshold on GC
-	true	// resize heap on gc
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0		// number of iterations to wait	
 };
 
 GcPolSpec *MMI1D = &GcPolMMI1D;
@@ -213,7 +254,10 @@ static GcPolSpec GcPolRT1 = {
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
 	1,		// resize threshold on GC
-	false	// resize heap on gc
+	false,	// resize heap on gc
+	20,		// time to add
+	20,		// time to wait
+	50		// number of iterations to wait	
 };
 GcPolSpec *RT1 = &GcPolRT1;
 
@@ -224,7 +268,10 @@ static GcPolSpec GcPolRT2 = {
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
 	0,		// resize threshold on GC
-	false	// resize heap on gc
+	false,	// resize heap on gc
+	20,		// time to add
+	20,		// time to wait
+	50		// number of iterations to wait	
 };
 
 GcPolSpec *RT2 = &GcPolRT2;
@@ -243,6 +290,12 @@ const GcPolSpec policies[NUM_POLICIES] = {stockPol,
 										  GcPolRT1, 
 										  GcPolRT2};
 GcPolSpec policy;
+
+/*
+ * sets constraints to the correct policy
+ */
+void setPolicy(int policyNumb);
+
 
 void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
 {
@@ -535,6 +588,9 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
 	beforeWrite = dvmGetRTCTimeMsec();
 	#endif
     fprintf(fileLog, "%s%s}\n", logPrefix, partialEntry);
+	#ifdef snappyDebugging
+	fflush(fileLog);
+	#endif
 	#ifdef logWriteTime
 	afterWrite = dvmGetRTCTimeMsec();
 	getCPUStats(after);
@@ -707,7 +763,7 @@ u8 getGCTimeAverage(int numIterations)
 void adjustThreshold()
 {
 	// make sure vars have been set up first
-	if (!logReady)
+	if (!logReady || policyNumber < 12)
 		return;
 	// get freespace 500ms ago
 	size_t free500msAgo = freeHistory[(currInterval + (intervals + 1)) % intervals];
@@ -716,7 +772,7 @@ void adjustThreshold()
 	// threshold so an additional 20ms
 	// should elapse before gc runs
 	if (lastGCTime < lastExhaustion) {
-		threshold += (free500msAgo/25);
+		threshold += ((free500msAgo * timeToAdd)/500.0);
 	} else if (lastGCTime > lastExhaustion) {
 		setThreshold();
 	}
@@ -732,7 +788,7 @@ void adjustThreshold()
  */
 void _initLogFile()
 {
-    GcPolSpec policy;
+    //GcPolSpec policy = policies;
     
     initLogDone = 0;
     skipLogging = 0;
@@ -753,11 +809,12 @@ void _initLogFile()
     inGC = 0;   
 	thresholdOnGC = 0;
 	minSleepTime.tv_sec = 0;
-	minSleepTime.tv_nsec = 2000000L; // 20ms
+	minSleepTime.tv_nsec = 1000000L; // 1ms
+	currIterations = 0;
      
     // defaults
     // MI2A and no logging
-    policy = policies[5];
+    int polNumb = DEFAULT_POLICY;
 
     // if we're a blacklisted process
     // skip logging
@@ -792,12 +849,7 @@ void _initLogFile()
         // full process yet so wait a bit
         // for full init
         skipLogging = 1;
-        policyNumber = policy.policyNumber;
-        minGCTime = policy.minTime;
-        intervals = policy.intervals;
-		adaptive = policy.adaptive;
-		resizeThreshold = policy.resizeThreshold;	
-		resizeOnGC = policy.resizeOnGC;	
+        setPolicy(polNumb);
         return;
     }
 	#else
@@ -868,15 +920,10 @@ void _initLogFile()
         // MI2A and no logging
         // yes it's duplicated but the compiler 
         // misses the fact that it's above
-        policy = policies[5];
+        polNumb = DEFAULT_POLICY;
         skipLogging = 1;
 
-        policyNumber = policy.policyNumber;
-        minGCTime = policy.minTime;
-        intervals = policy.intervals;
-		adaptive = policy.adaptive;
-		resizeThreshold = policy.resizeThreshold;	
-		resizeOnGC = policy.resizeOnGC;
+        setPolicy(polNumb);
         logReady = true;
         return; // GC Policy file doesn't exist so we just run defaults anyway
     }
@@ -885,11 +932,10 @@ void _initLogFile()
     // MI2A and no logging
     // yes it's duplicated but the compiler 
     // misses the fact that it's above
-    policy = policies[5];
     skipLogging = 1;
     
     if (polVal[0]) {
-         int polNumb = atoi(polVal);
+         polNumb = atoi(polVal);
          #ifdef snappyDebugging
          ALOGD("Robust Log Policy Number %d", polNumb);
          #endif
@@ -905,18 +951,15 @@ void _initLogFile()
              //#endif
          }
          if ((polNumb > 0) && (polNumb <= NUM_POLICIES)) {
-            policy = policies[polNumb - 1];
-         }
+            polNumb = polNumb;
+         } else {
+			polNumb = DEFAULT_POLICY;
+		}
     }
         
     // set up the policy we'll be executing
     // read the numbers from the list we have stored
-    policyNumber = policy.policyNumber;
-    minGCTime = policy.minTime;
-    intervals = policy.intervals;
-	adaptive = policy.adaptive;
-	resizeThreshold = policy.resizeThreshold;
-	resizeOnGC = policy.resizeOnGC;	
+    setPolicy(polNumb);
     ALOGD("Robust Log policy Number %d", policyNumber);
         ALOGD("MinGCTime %d", minGCTime);
     
@@ -1022,6 +1065,26 @@ int continousGC(const GcSpec* spec)
     inGC = 0;
     return 0;
 }
+
+/*
+ * Sets constraints to the appropriate policies
+ */
+void setPolicy(int policyNumb)
+{
+	policy = policies[policyNumb - 1];
+
+	policyNumber = policy.policyNumber;
+    minGCTime = policy.minTime;
+    intervals = policy.intervals;
+	adaptive = policy.adaptive;
+	resizeThreshold = policy.resizeThreshold;
+	resizeOnGC = policy.resizeOnGC;	
+	timeToAdd = policy.timeToAdd;
+	timeToWait = policy.timeToWait;
+	numIterations = policy.numIterations;
+	
+}
+
 
 /***************************************************
  * Utility functions below
@@ -1252,6 +1315,9 @@ unsigned int minGCTime;
 unsigned int intervals;
 unsigned int adaptive;
 unsigned int resizeThreshold;
+unsigned short timeToWait;
+unsigned short numIterations;
+unsigned short currIterations;
 size_t numBytesFreedLog;
 size_t objsFreed;
 size_t lastAllocSize;

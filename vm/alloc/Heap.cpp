@@ -69,6 +69,15 @@ static const GcSpec kGcConcurrentSpec  = {
 
 const GcSpec *GC_CONCURRENT = &kGcConcurrentSpec;
 
+static const GcSpec kGcExplicitFullSpec = {
+    false,  /* isPartial */
+    true,  /* isConcurrent */
+    true,  /* doPreserve */
+    "GC_EXPLICIT_FULL"
+};
+
+const GcSpec *GC_EXPLICIT_FULL = &kGcExplicitFullSpec;
+
 static const GcSpec kGcExplicitSpec = {
     false,  /* isPartial */
     true,  /* isConcurrent */
@@ -235,7 +244,9 @@ static void *tryMalloc(size_t size)
      // of running gcs
      if ((policyNumber != 1) && (policyNumber < 12)) {
          
-		//ALOGD("Robust Policy Check Malloc Fail");
+		#ifdef snappyDebugging
+		ALOGD("Robust Policy Check Malloc Fail, polcy < 12 != 1");
+		#endif
 		// if we're running adaptive set the threshold
 		if (adaptive) {
 			setThreshold();
@@ -266,6 +277,11 @@ static void *tryMalloc(size_t size)
          
         //ALOGD("Robust Policy Check Malloc Fail GC");        
      } else if (policyNumber >= 12) {
+
+		#ifdef snappyDebugging
+		ALOGD("Robust Policy Check Malloc Fail, policy >= 12");
+		#endif
+
 		/* 
 		 * New Rate Throttling Policies algo
 		 */
@@ -296,7 +312,7 @@ static void *tryMalloc(size_t size)
 			if ((dvmGetRTCTimeMsec() - gcStartTime) > (getGCTimeAverage() - 20)) {
 				// keep trying to mall every 20ms, after 20 grow heap and move one
 				i = 0;				
-				while (i < 20) {	
+				while (i < timeToWait) {	
 					ptr = dvmHeapSourceAlloc(size);
 					if (ptr != NULL) {
 						return ptr;
@@ -307,7 +323,7 @@ static void *tryMalloc(size_t size)
 							return ptr;
 						}
 					}
-					i += 2;
+					i += 1;
 					nanosleep(&minSleepTime, NULL);
 					
 				}	
@@ -638,7 +654,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     // MI2A will allow them to go through
     // MI2S also ignores
     // MI2AE uses it to schedule GC
-    if (((policyNumber == 3) || (policyNumber >= 5)) && !spec->isPartial && spec->isConcurrent) {
+    if (((policyNumber == 3) || (policyNumber >= 5)) && (spec == GC_EXPLICIT)) {
         if (policyNumber == 5) {
             schedGC = true;
         }
@@ -949,6 +965,18 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 
     /* Write GC info to log if the log's ready*/
     logPrint(LOG_GC, spec, numBytesFreed, numObjectsFreed);
+
+	// if we're concurrent increase the number of iterations
+	if ((policyNumber >= 12) && (spec == GC_CONCURRENT)) {
+		currIterations++;
+	}
+	// if we've run a minimum number 
+	// of iterations of partial GCs run a 
+	// full GC
+	if ((policyNumber >= 12) && (spec == GC_CONCURRENT) && (currIterations > numIterations)) {
+		currIterations = 0;
+		dvmCollectGarbageInternal(GC_EXPLICIT_FULL);
+	}
 }
 
 /*
