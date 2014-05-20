@@ -21,7 +21,7 @@
 #include "alloc/Logging.h"
 #include "sched.h"
 
-#define BUILD_ID "042914-2130-logOthers-noDalvik"
+#define BUILD_ID "050614-2130-logOthers-noDalvik"
 #define CONCURRENT_START_DEFAULT (128 << 10)
 #define NUM_GC_AVERAGES 10
 #define DEFAULT_POLICY 13
@@ -54,6 +54,7 @@ struct timespec minSleepTime;
 FILE* fileTest = NULL;
 FILE* others = NULL;
 FILE* notLogged = NULL;
+FILE* memDumpFile = NULL;
 
 int testTime(void);
 char fileName[128];
@@ -84,6 +85,12 @@ struct GcPolSpec {
 		unsigned short timeToWait;
 		/* number of times to wait before running full GC */
 		unsigned short numIterations;
+		/* alpha for partial GC weight average */
+		float partialAlpha;
+		/* alpha for full GC weight average */
+		float fullAlpha;
+		/* beta for partial/full GC scalling */
+		float beta;
 };
 
 static GcPolSpec stockPol = {
@@ -96,7 +103,10 @@ static GcPolSpec stockPol = {
 	true,	// resize heap on gc
 	0,		// time to add
 	0,		// time to wait
-	0		// number of iterations to wait	
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
 };
 GcPolSpec *stock = &stockPol;
 
@@ -110,7 +120,10 @@ static GcPolSpec GcPolMI2 = {
 	true,	// resize heap on gc
 	0,		// time to add
 	0,		// time to wait
-	0		// number of iterations to wait	
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
 };
 GcPolSpec *MI2 = &GcPolMI2;
 
@@ -124,7 +137,10 @@ static GcPolSpec GcPolMI2S = {
 	true,	// resize heap on gc
 	0,		// time to add
 	0,		// time to wait
-	0		// number of iterations to wait	
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
 };
 
 GcPolSpec *MI2S = &GcPolMI2S;
@@ -139,7 +155,10 @@ static GcPolSpec GcPolMI2A = {
 	true,	// resize heap on gc
 	0,		// time to add
 	0,		// time to wait
-	0		// number of iterations to wait	
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
 };
 
 GcPolSpec *MI2A = &GcPolMI2A;
@@ -154,7 +173,10 @@ static GcPolSpec GcPolMI2AE = {
 	true,	// resize heap on gc
 	0,		// time to add
 	0,		// time to wait
-	0		// number of iterations to wait	
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
 };
 
 GcPolSpec *MI2AE = &GcPolMI2AE;
@@ -169,7 +191,10 @@ static GcPolSpec GcPolMI2AI = {
 	true,	// resize heap on gc
 	0,		// time to add
 	0,		// time to wait
-	0		// number of iterations to wait	
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
 };
 
 GcPolSpec *MI2AI = &GcPolMI2AI;
@@ -184,7 +209,10 @@ static GcPolSpec GcPolMI1AI = {
 	true,	// resize heap on gc
 	0,		// time to add
 	0,		// time to wait
-	0		// number of iterations to wait	
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
 };
 
 GcPolSpec *MI1AI = &GcPolMI1AI;
@@ -199,7 +227,10 @@ static GcPolSpec GcPolMI2AD = {
 	true,	// resize heap on gc
 	0,		// time to add
 	0,		// time to wait
-	0		// number of iterations to wait	
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
 };
 
 GcPolSpec *MI2AD = &GcPolMI2AD;
@@ -214,7 +245,10 @@ static GcPolSpec GcPolMI1D = {
 	true,	// resize heap on gc
 	0,		// time to add
 	0,		// time to wait
-	0		// number of iterations to wait	
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
 };
 
 GcPolSpec *MI1D = &GcPolMI1D;
@@ -229,7 +263,10 @@ static GcPolSpec GcPolMMI2AD = {
 	true,	// resize heap on gc
 	0,		// time to add
 	0,		// time to wait
-	0		// number of iterations to wait	
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
 };
 
 static GcPolSpec GcPolMMI1D = {
@@ -242,7 +279,10 @@ static GcPolSpec GcPolMMI1D = {
 	true,	// resize heap on gc
 	0,		// time to add
 	0,		// time to wait
-	0		// number of iterations to wait	
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
 };
 
 GcPolSpec *MMI1D = &GcPolMMI1D;
@@ -255,9 +295,12 @@ static GcPolSpec GcPolRT1 = {
 	1,		// adaptive
 	1,		// resize threshold on GC
 	false,	// resize heap on gc
-	20,		// time to add
-	20,		// time to wait
-	50		// number of iterations to wait	
+	10,		// time to add
+	15,		// time to wait
+	50,		// number of iterations to wait	
+	.2,		// alpha for partial gc average
+	.5,		// alpha for full gc average
+	1		// beta
 };
 GcPolSpec *RT1 = &GcPolRT1;
 
@@ -269,9 +312,12 @@ static GcPolSpec GcPolRT2 = {
 	1,		// adaptive
 	0,		// resize threshold on GC
 	false,	// resize heap on gc
-	20,		// time to add
-	20,		// time to wait
-	50		// number of iterations to wait	
+	10,		// time to add
+	15,		// time to wait
+	50,		// number of iterations to wait	
+	.2,		// alpha for partial gc average
+	.5,		// alpha for full gc average
+	1		// beta
 };
 
 GcPolSpec *RT2 = &GcPolRT2;
@@ -521,8 +567,8 @@ void buildGCEvent(const char* beginEnd,const char* eventName, int seqNumber, con
     char cpuSpeed[] = "noData ";
     logCPUSpeed(cpuSpeed);
 
-    sprintf(output, "%s,\"GCType\":\"%s\",\"cpuSpeed-Hz\":\"%s\",\"rootScanTime\":%llu,\"bytesFreed-kb\":%f,\"objectsFreed\":%u",
-        partial, spec->reason, cpuSpeed, rootScanTime, numBytesFreedLog / 1024.0, objsFreed);
+    sprintf(output, "%s,\"GCType\":\"%s\",\"cpuSpeed-Hz\":\"%s\",\"rootScanTime\":%llu,\"bytesFreed-kb\":%f,\"objectsFreed\":%u,\"numIterations\":%u",
+        partial, spec->reason, cpuSpeed, rootScanTime, numBytesFreedLog / 1024.0, objsFreed, numIterations);
 }
 
 /*
@@ -772,7 +818,7 @@ void adjustThreshold()
 	// threshold so an additional 20ms
 	// should elapse before gc runs
 	if (lastGCTime < lastExhaustion) {
-		threshold += ((free500msAgo * timeToAdd)/500.0);
+		threshold -= ((free500msAgo * timeToAdd)/500.0);
 	} else if (lastGCTime > lastExhaustion) {
 		setThreshold();
 	}
@@ -984,6 +1030,11 @@ void _initLogFile()
     strcpy(fileName, baseDir);
     strcat(fileName, processName);
     strcat(fileName, ".txt");
+
+	char memDup[100];
+	strcpy(memDup, baseDir);
+    strcat(memDup, processName);
+    strcat(memDup, ".dxt");
     
     // create the directory for log files
     mkdir("/sdcard/robust", S_IRWXU | S_IRWXG | S_IRWXO);
@@ -993,6 +1044,8 @@ void _initLogFile()
 	ALOGD("Filelog %p",fileLog);
     #endif
     fileLog = fopen(fileName, "at" );
+	memDumpFile = fopen(memDup, "at" );
+	
 
 	logPrefix[0] = '\0';
 	#ifdef logOthers
@@ -1082,7 +1135,28 @@ void setPolicy(int policyNumb)
 	timeToAdd = policy.timeToAdd;
 	timeToWait = policy.timeToWait;
 	numIterations = policy.numIterations;
+	partialAlpha = policy.partialAlpha;
+	fullAlpha = policy.fullAlpha;
+	beta = policy.beta;
 	
+}
+
+/*
+ * recomputes full/partial iteration ratio
+ */
+void computePartialFull(void)
+{
+	if (avgPercFreedFull > 0)
+		numIterations = beta * numIterations * avgPercFreedPartial / avgPercFreedFull;
+	else
+		numIterations = 100;
+}
+
+void memDumpHandler(void* start, void* end, size_t used_bytes,
+                                void* arg)
+{
+	if (memDumpFile)
+		fprintf(memDumpFile,"%p %p %u\n", start, end, used_bytes);
 }
 
 
@@ -1318,6 +1392,11 @@ unsigned int resizeThreshold;
 unsigned short timeToWait;
 unsigned short numIterations;
 unsigned short currIterations;
+float partialAlpha;
+float fullAlpha;
+float beta;
+float avgPercFreedPartial;
+float avgPercFreedFull;
 size_t numBytesFreedLog;
 size_t objsFreed;
 size_t lastAllocSize;

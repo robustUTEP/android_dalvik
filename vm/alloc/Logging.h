@@ -35,6 +35,16 @@ extern unsigned int resizeThreshold;
 extern unsigned short timeToWait;
 extern unsigned short numIterations;
 extern unsigned short currIterations;
+extern float partialAlpha;
+extern float fullAlpha;
+extern float beta;
+extern float avgPercFreedPartial;
+extern float avgPercFreedFull;
+extern float partialAlpha;
+extern float fullAlpha;
+extern float beta;
+extern float avgPercFreedPartial;
+extern float avgPercFreedFull;
 extern FILE* fileLog;
 extern bool schedGC;
 extern bool resizeOnGC;
@@ -199,6 +209,18 @@ void getDeviceName(void);
  * Get the current count if available
  */
 unsigned long getCount(int cpu);
+
+/*
+ * recomputes full/partial iteration ratio
+ */
+void computePartialFull(void);
+
+/*
+ * dump memory to file
+ */
+void memDumpHandler(void* start, void* end, size_t used_bytes,
+                                void* arg);
+
 
 /*
  * Get the per-process CPU time, in nanoseconds

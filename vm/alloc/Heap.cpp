@@ -43,6 +43,7 @@
 #include <cutils/properties.h>
 
 #include "alloc/Logging.h"
+#include "alloc/DlMalloc.h"
 
 static int debugalloc()
 {
@@ -309,8 +310,8 @@ static void *tryMalloc(size_t size)
 			 * otherwise grow heap and move on
 			 */
 	
-			if ((dvmGetRTCTimeMsec() - gcStartTime) > (getGCTimeAverage() - 20)) {
-				// keep trying to mall every 20ms, after 20 grow heap and move one
+			if ((dvmGetRTCTimeMsec() - gcStartTime) > (getGCTimeAverage() - 15)) {
+				// keep trying to mall every 15ms, after 15 grow heap and move one
 				i = 0;				
 				while (i < timeToWait) {	
 					ptr = dvmHeapSourceAlloc(size);
@@ -687,6 +688,10 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 
     gcHeap->gcRunning = true;
 
+	/* *** dump heap *** */
+	//dlmalloc_inspect_all(memDumpHandler, NULL);
+	//mspace_inspect_all(heap->msp, memDumpHandler, NULL);
+
     rootStart = dvmGetRelativeTimeMsec();
 	gcStartTime = dvmGetRTCTimeMsec();
     ATRACE_BEGIN("GC: Threads Suspended"); // Suspend A
@@ -863,7 +868,10 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 
     dvmMethodTraceGCEnd();
     LOGV_HEAP("GC finished");
-
+	
+	/* *** dump heap *** */
+	//mspace_inspect_all(heap->msp, memDumpHandler, NULL);
+	//dlmalloc_inspect_all(memDumpHandler, NULL);
     gcHeap->gcRunning = false;
 
     LOGV_HEAP("Resuming threads");
@@ -969,6 +977,22 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 	// if we're concurrent increase the number of iterations
 	if ((policyNumber >= 12) && (spec == GC_CONCURRENT)) {
 		currIterations++;
+	}
+
+	// recompute average GC yeilds
+	if (spec == GC_CONCURRENT) {
+		if (avgPercFreedPartial > 0) {
+			avgPercFreedPartial = (partialAlpha * (float)numBytesFreed) + ((1 - partialAlpha) * (float)avgPercFreedPartial);
+		} else {
+			avgPercFreedPartial = numBytesFreed;
+		}
+	}	
+	if (spec == GC_EXPLICIT_FULL) {
+		if (avgPercFreedFull > 0) {
+			avgPercFreedFull = (fullAlpha * (float)numBytesFreed) + ((1 - fullAlpha) * (float)avgPercFreedFull);
+		} else {
+			avgPercFreedFull = numBytesFreed;
+		}
 	}
 	// if we've run a minimum number 
 	// of iterations of partial GCs run a 
