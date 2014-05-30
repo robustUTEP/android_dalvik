@@ -11,7 +11,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define NUM_POLICIES 13
+#define NUM_POLICIES 14
 #define LOG_CUSTOM 0
 #define LOG_TRY_MALLOC 1
 #define LOG_GC 2
@@ -220,6 +220,18 @@ void computePartialFull(void);
  */
 void memDumpHandler(void* start, void* end, size_t used_bytes,
                                 void* arg);
+
+/* 
+ * logger that gets called every second for events we want
+ * to occur on a timed schedule
+ */
+void timed(void);
+
+/*
+ * read and write current GC threshold
+ */
+void writeThreshold(void);
+void readThreshold(void);
 
 
 /*

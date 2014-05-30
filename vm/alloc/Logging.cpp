@@ -21,7 +21,7 @@
 #include "alloc/Logging.h"
 #include "sched.h"
 
-#define BUILD_ID "050614-2130-logOthers-noDalvik"
+#define BUILD_ID "052814-2130-logOthers-noDalvik-saveStats"
 #define CONCURRENT_START_DEFAULT (128 << 10)
 #define NUM_GC_AVERAGES 10
 #define DEFAULT_POLICY 13
@@ -290,10 +290,10 @@ GcPolSpec *MMI1D = &GcPolMMI1D;
 static GcPolSpec GcPolRT1 = {
 	"RT1",
 	12,		// Policy Number
-	2000,	// minGCTime
+	1000,	// minGCTime
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
-	1,		// resize threshold on GC
+	0,		// resize threshold on GC
 	false,	// resize heap on gc
 	10,		// time to add
 	15,		// time to wait
@@ -307,7 +307,7 @@ GcPolSpec *RT1 = &GcPolRT1;
 static GcPolSpec GcPolRT2 = {
 	"RT2",
 	13,		// Policy Number
-	1000,	// minGCTime
+	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
 	1,		// adaptive
 	0,		// resize threshold on GC
@@ -322,6 +322,24 @@ static GcPolSpec GcPolRT2 = {
 
 GcPolSpec *RT2 = &GcPolRT2;
 
+static GcPolSpec GcPolRT4 = {
+	"RT4",
+	14,		// Policy Number
+	4000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	1,		// adaptive
+	0,		// resize threshold on GC
+	false,	// resize heap on gc
+	10,		// time to add
+	15,		// time to wait
+	50,		// number of iterations to wait	
+	.2,		// alpha for partial gc average
+	.5,		// alpha for full gc average
+	1		// beta
+};
+
+GcPolSpec *RT4 = &GcPolRT4;
+
 const GcPolSpec policies[NUM_POLICIES] = {stockPol, 
 										  GcPolMI2, 
 										  GcPolMI2S, 
@@ -334,7 +352,8 @@ const GcPolSpec policies[NUM_POLICIES] = {stockPol,
 										  GcPolMMI2AD, 
 										  GcPolMMI1D, 
 										  GcPolRT1, 
-										  GcPolRT2};
+										  GcPolRT2,
+										  GcPolRT4};
 GcPolSpec policy;
 
 /*
@@ -421,6 +440,7 @@ void logMalloc(bool mallocFail)
     static int thisMallocSeqNumb;
     static int maxMallocs = 2000;
     static int numChecks = 0;
+	static int counts = 0;
     string beginOrEnd;
 
     static u8 lastMallocTime = 0;
@@ -463,6 +483,12 @@ void logMalloc(bool mallocFail)
 				maxMallocs = (mallocsDone >> 4) + 50;
                 numChecks = 0;
 				mallocsDone = 0;
+
+				// if we've run over a second
+				counts++;
+				if (counts > 10) {
+					timed();
+				}
             }
         }
         numMallocs++;
@@ -1060,8 +1086,16 @@ void _initLogFile()
         // bump our buffer log size to 12k
         setvbuf(fileLog, NULL, _IOFBF, 12287);
 
+		// catchall log needs to be a bit bigger to 
+		// cover all procs
+		if (fileLog == others)
+			setvbuf(fileLog, NULL, _IOFBF, 40000);
+
         fprintf(fileLog, "\n\n%s@header{\"deviceName\":\"%s\",\"deviceID\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu,\"Build_ID\":\""BUILD_ID"\"}\n",
             logPrefix, deviceName, uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
+		if (policyNumber > 12)
+			readThreshold();
+		ALOGD("Robust log reading threshold %d",threshold);
         logReady = true;
 		preDone = 1; // we're a preinitialization process and we should be done here
 		ALOGD("Robust Log opened file %s", fileName);
@@ -1159,7 +1193,52 @@ void memDumpHandler(void* start, void* end, size_t used_bytes,
 		fprintf(memDumpFile,"%p %p %u\n", start, end, used_bytes);
 }
 
+/*
+ * writes current GC threshold to file
+ */ 
+void writeThreshold(void) {
+	char threshFileName[128];
+	char baseDir[] = "/sdcard/robust/";
+    strcpy(threshFileName, baseDir);
+    strcat(threshFileName, thisProcessName);
+	strcat(threshFileName, "_thresh\0");
+    strcat(threshFileName, ".txt");
+	
+	FILE *tFile = fopen(threshFileName, "wt");
+	
+	if (tFile) {
+		fprintf(tFile,"%d", threshold);
+		fclose(tFile);
+	}
+}
 
+void readThreshold(void) {
+	char threshFileName[128];
+	char baseDir[] = "/sdcard/robust/";
+    strcpy(threshFileName, baseDir);
+    strcat(threshFileName, thisProcessName);
+	strcat(threshFileName, "_thresh\0");
+    strcat(threshFileName, ".gxt");
+	
+	FILE *tFile = fopen(threshFileName, "rt");
+	
+	if (tFile) {
+		if (!fscanf(tFile,"%d", &threshold)) {
+			threshold = (128 << 10);
+		}
+		fclose(tFile);
+	}
+}
+
+void timed(void) 
+{
+	static int seconds = 0;
+	if (seconds ==10) {
+		writeThreshold();
+		seconds = 0;
+	}
+	seconds++;
+}
 /***************************************************
  * Utility functions below
  * These are just utility functions need for logging

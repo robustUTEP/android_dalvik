@@ -41,8 +41,8 @@
 #include "compiler/codegen/Optimizer.h"
 #endif
 
-#define kMinHeapStartSize   (1*1024*1024)
-#define kMinHeapSize        (2*1024*1024)
+#define kMinHeapStartSize   (1*1024)
+#define kMinHeapSize        (2*1024)
 #define kMaxHeapSize        (1*1024*1024*1024)
 
 /*

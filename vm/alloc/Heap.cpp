@@ -37,10 +37,7 @@
 #include <errno.h>
 #include <cutils/process_name.h>
 #include <cutils/properties.h>
-
-
 #include <cutils/trace.h>
-#include <cutils/properties.h>
 
 #include "alloc/Logging.h"
 #include "alloc/DlMalloc.h"
