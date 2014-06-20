@@ -797,6 +797,15 @@ size_t dvmHeapSourceGetValue(HeapSourceValueSpec spec, size_t perHeapStats[],
         case HS_OBJECTS_ALLOCATED:
             value = heap->objectsAllocated;
             break;
+        case HS_VM_SIZE:
+            value = heap->limit - heap->base;
+            break;
+        case HS_BASE:
+            value = (size_t) (heap->base - 0);
+            break;
+        case HS_LIMIT:
+            value = (size_t) (heap->limit - 0);
+            break;
         default:
             // quiet gcc
             break;

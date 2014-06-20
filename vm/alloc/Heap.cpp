@@ -230,6 +230,7 @@ static void *tryMalloc(size_t size)
     ptr = dvmHeapSourceAlloc(size);
     if (ptr != NULL) {
         logPrint(LOG_TRY_MALLOC, false, size, 0);
+		savePtr(ptr, size);
         return ptr;
     }
 	
@@ -255,6 +256,7 @@ static void *tryMalloc(size_t size)
 		if ((adaptive) && (ptr != NULL)) {
 			logPrint(LOG_TRY_MALLOC, true, size, 0);
 			//ALOGD("Robust Policy Check Malloc Fail Grow");
+			savePtr(ptr, size);
 			return ptr;
 		}
 
@@ -265,10 +267,12 @@ static void *tryMalloc(size_t size)
 		if ((policyNumber < 10) && (elapsedSinceGC < minGCTime) && (ptr != NULL)) {
 			logPrint(LOG_TRY_MALLOC, true, size, 0);
 			//ALOGD("Robust Policy Check Malloc Fail Below Threshold Time");
+			savePtr(ptr, size);
 			return ptr;
 		} else if ((elapsedCPUSinceGC < (minGCTime / 2)) && (elapsedSinceGC < minGCTime) && (ptr != NULL)) {
 			logPrint(LOG_TRY_MALLOC, true, size, 0);
 			//ALOGD("Robust Policy Check Malloc Fail Below Threshold Time");
+			savePtr(ptr, size);
 			return ptr;
 		}			
 	
@@ -283,9 +287,9 @@ static void *tryMalloc(size_t size)
 		/* 
 		 * New Rate Throttling Policies algo
 		 */
-		if (firstExhaustSinceGC) {			
+		if (firstExhaustSinceGC) {
+			firstExhaustSinceGC = false;			
 			adjustThreshold();
-			firstExhaustSinceGC = false;
 		}
 
 		/*
@@ -298,6 +302,7 @@ static void *tryMalloc(size_t size)
 			// grow heap and move on
 			ptr = dvmHeapSourceAllocAndGrow(size);
 			if (ptr != NULL) {
+				savePtr(ptr, size);
 				return ptr;
 			}
 		} else {
@@ -313,11 +318,13 @@ static void *tryMalloc(size_t size)
 				while (i < timeToWait) {	
 					ptr = dvmHeapSourceAlloc(size);
 					if (ptr != NULL) {
+						savePtr(ptr, size);
 						return ptr;
 					}
 					if (!gDvm.gcHeap->gcRunning) {
 						ptr = dvmHeapSourceAllocAndGrow(size);
 						if (ptr != NULL) {
+							savePtr(ptr, size);
 							return ptr;
 						}
 					}
@@ -330,11 +337,13 @@ static void *tryMalloc(size_t size)
 				// enough space so grow and move on
 				ptr = dvmHeapSourceAllocAndGrow(size);
 				if (ptr != NULL) {
+					savePtr(ptr, size);
 					return ptr;
 				}
 			} else {
 				ptr = dvmHeapSourceAllocAndGrow(size);
 				if (ptr != NULL) {
+					savePtr(ptr, size);
 					return ptr;
 				}
 			}
@@ -365,6 +374,7 @@ static void *tryMalloc(size_t size)
     ptr = dvmHeapSourceAlloc(size);
     if (ptr != NULL) {
         logPrint(LOG_TRY_MALLOC, true, size, 0);
+		savePtr(ptr, size);
         return ptr;
     }
 
@@ -384,6 +394,7 @@ static void *tryMalloc(size_t size)
                 "%zu.%03zuMB for %zu-byte allocation",
                 FRACTIONAL_MB(newHeapSize), size);
         logPrint(LOG_TRY_MALLOC, true, size, 0);
+		savePtr(ptr, size);
         return ptr;
     }
 
@@ -400,6 +411,7 @@ static void *tryMalloc(size_t size)
     ptr = dvmHeapSourceAllocAndGrow(size);
     if (ptr != NULL) {
         logPrint(LOG_TRY_MALLOC, true, size, 0);
+		savePtr(ptr, size);
         return ptr;
     }
 //TODO: maybe wait for finalizers and try one last time
@@ -686,7 +698,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     gcHeap->gcRunning = true;
 
 	/* *** dump heap *** */
-	//dlmalloc_inspect_all(memDumpHandler, NULL);
+	saveHeap();
 	//mspace_inspect_all(heap->msp, memDumpHandler, NULL);
 
     rootStart = dvmGetRelativeTimeMsec();
@@ -868,7 +880,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 	
 	/* *** dump heap *** */
 	//mspace_inspect_all(heap->msp, memDumpHandler, NULL);
-	//dlmalloc_inspect_all(memDumpHandler, NULL);
+	saveHeap();
     gcHeap->gcRunning = false;
 
     LOGV_HEAP("Resuming threads");

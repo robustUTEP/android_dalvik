@@ -49,12 +49,16 @@ extern FILE* fileLog;
 extern bool schedGC;
 extern bool resizeOnGC;
 extern size_t thresholdOnGC;
+extern size_t maxAdd;
+extern size_t minAdd;
 extern bool firstExhaustSinceGC;
+extern bool dumpHeap;
 
 extern size_t lastRequestedSize;
 extern string processName;
 extern int freeHistory[10]; // histogram
 extern size_t threshold; // threshold for starting concurrent GC
+extern size_t freeExhaust; // free 500 ms before exhaust
 extern u8 lastGCTime; // for scheduling GCs
 extern u8 lastGCCPUTime; // ditto just cpu time instead
 extern u8 gcStartTime; // start time of the last GC
@@ -215,8 +219,13 @@ unsigned long getCount(int cpu);
  */
 void computePartialFull(void);
 
+/* 
+ * dumps heap and saves to disk
+ */
+void saveHeap(void);
+
 /*
- * dump memory to file
+ * memory dump handler
  */
 void memDumpHandler(void* start, void* end, size_t used_bytes,
                                 void* arg);
@@ -226,6 +235,11 @@ void memDumpHandler(void* start, void* end, size_t used_bytes,
  * to occur on a timed schedule
  */
 void timed(void);
+
+/*
+ * save pointer address, and size
+ */
+void savePtr(void *ptr, size_t size);
 
 /*
  * read and write current GC threshold

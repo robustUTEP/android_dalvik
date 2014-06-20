@@ -20,8 +20,9 @@
 #include "sys/stat.h"
 #include "alloc/Logging.h"
 #include "sched.h"
+#include "alloc/DlMalloc.h"
 
-#define BUILD_ID "052814-2130-logOthers-noDalvik-saveStats"
+#define BUILD_ID "061914-2130-logOthers-noDalvik-saveStats"
 #define CONCURRENT_START_DEFAULT (128 << 10)
 #define NUM_GC_AVERAGES 10
 #define DEFAULT_POLICY 13
@@ -561,7 +562,7 @@ char* buildBasicEvent(const char* beginEnd,const char* eventName, int seqNumber,
 void buildHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, char output[])
 {
     char partial[MAX_STRING_LENGTH];
-    size_t heapsAlloc[2], heapsFootprint[2], heapsMax[2], numObjects[2];
+    size_t heapsAlloc[2], heapsFootprint[2], heapsMax[2], numObjects[2], heapsLimit[2];
     float thresholdKb = threshold / 1024.0;
         heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = heapsMax[0] = heapsMax[1] = 0;
 
@@ -569,18 +570,35 @@ void buildHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, c
     dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
     dvmHeapSourceGetValue(HS_ALLOWED_FOOTPRINT, heapsMax, 2);
     dvmHeapSourceGetValue(HS_OBJECTS_ALLOCATED, numObjects, 2);
+	dvmHeapSourceGetValue(HS_VM_SIZE, heapsLimit, 2);
 
     heapsAlloc[0] = heapsAlloc[0] / 1024;
     heapsFootprint[0] = heapsFootprint[0] / 1024;
     heapsMax[0] = heapsMax[0] / 1024;
+	heapsLimit[0] = heapsLimit[0] / 1024;
     heapsAlloc[1] = heapsAlloc[1] / 1024;
     heapsFootprint[1] = heapsFootprint[1] / 1024;
     heapsMax[1] = heapsMax[1] / 1024;
+	heapsLimit[1] = heapsLimit[1] / 1024;
 
     buildBasicEvent(beginEnd, eventName, seqNumber, partial);
 
-    sprintf(output, "%s,\"currAlloc0-kB\":%d,\"currFootprint0-kB\":%d,\"currMax0-kB\":%d,\"numObjects0\":%d,\"currAlloc1-kB\":%d,\"currFootprint1-kB\":%d,\"currMax1-kB\":%d,\"numObjects1\":%d,\"threshold-kB\":%f",
-        partial, heapsAlloc[0], heapsFootprint[0], heapsMax[0], numObjects[0], heapsAlloc[1], heapsFootprint[1], heapsMax[1], numObjects[1], thresholdKb);
+    sprintf(output, "%s,\"currAlloc0-kB\":%d,\"currFootprint0-kB\":%d,\"currLimit0-kB\":%d,\"currMax0-kB\":%d,\"numObjects0\":%d,\"minAdd0\":%d,\"maxAdd0\":%d,\"arenaSize0\":%d,\"currAlloc1-kB\":%d,\"currFootprint1-kB\":%d,\"currLimit1-kB\":%d,\"currMax1-kB\":%d,\"numObjects1\":%d,\"threshold-kB\":%f",
+        partial, 
+		heapsAlloc[0], 
+		heapsFootprint[0], 
+		heapsLimit[0],
+		heapsMax[0], 
+		numObjects[0], 
+		minAdd,
+		maxAdd,
+		maxAdd - minAdd,
+		heapsAlloc[1], 
+		heapsFootprint[1], 
+		heapsLimit[1],
+		heapsMax[1], 
+		numObjects[1], 
+		thresholdKb);
 }
 
 /*
@@ -701,7 +719,7 @@ void scheduleConcurrentGC()
 		u8 timeSinceLastGCCPU = dvmGetTotalProcessCpuTimeMsec() - lastGCCPUTime;
 
         // check and see if we're at the min time from a concurrent GC
-        if (((timeSinceLastGC > minGCTime) && policyNumber < 9) || ((timeSinceLastGC > minGCTime) && (timeSinceLastGCCPU > (minGCTime / 2)))) {
+        if (((timeSinceLastGC > minGCTime) && policyNumber < 9) || ((timeSinceLastGC > minGCTime) || (timeSinceLastGCCPU > (minGCTime / 2)))) {
 
             #ifdef snappyDebugging
             ALOGD("Robust Schedule Concurrent Min Time Complete");
@@ -843,9 +861,35 @@ void adjustThreshold()
 	// if gc completed early bump up the
 	// threshold so an additional 20ms
 	// should elapse before gc runs
-	if (lastGCTime < lastExhaustion) {
-		threshold -= ((free500msAgo * timeToAdd)/500.0);
-	} else if (lastGCTime > lastExhaustion) {
+
+	char *custMsg;
+	custMsg = (char *)malloc(512);
+	size_t heapsLimit[2], heapsBase[2];
+	dvmHeapSourceGetValue(HS_LIMIT, heapsLimit, 2);
+	dvmHeapSourceGetValue(HS_BASE, heapsBase, 2);
+	sprintf(custMsg,",\"base\":%d,\"limit\":%d,\"lastGCTime\":%llu,\"lastExhaustion\":%llu,\"free500msAgo\":%d,\"timeToAdd\":%d,\"firstExhaust\":\"%s\",\"freeHistory\":%d|%d|%d|%d|%d"
+			,heapsBase[0]
+			,heapsLimit[0]			
+			,lastGCTime
+			,lastExhaustion
+			,free500msAgo
+			,timeToAdd
+			,(firstExhaustSinceGC ? "true" : "false")
+			,freeHistory[0],freeHistory[1],freeHistory[2],freeHistory[3],freeHistory[4]);
+	logPrint(LOG_CUSTOM,"debugLogAdjustNumbs", (char*)custMsg);
+
+	// if there hasn't been an exhaustion since GC
+	// then we shrink the threshold
+	// otherwise if we did exhaust just go back 500ms
+	if (firstExhaustSinceGC) {
+		// in the event we want to shrink the heap to a size
+		// less than zero set it to something reasonably small
+		size_t temp = ((free500msAgo * timeToAdd)/500.0);
+		if (temp >= threshold)
+			threshold = 100;
+		else
+			threshold -= temp;
+	} else {
 		setThreshold();
 	}
 	// just in case
@@ -864,6 +908,7 @@ void _initLogFile()
     
     initLogDone = 0;
     skipLogging = 0;
+	dumpHeap = false;
 
     /* Get process name */
     const char* processName = get_process_name();
@@ -883,7 +928,9 @@ void _initLogFile()
 	minSleepTime.tv_sec = 0;
 	minSleepTime.tv_nsec = 1000000L; // 1ms
 	currIterations = 0;
-     
+    maxAdd = 0;
+	minAdd = (size_t) - 1;
+ 
     // defaults
     // MI2A and no logging
     int polNumb = DEFAULT_POLICY;
@@ -973,6 +1020,7 @@ void _initLogFile()
     char polFile[] = "/sdcard/robust/GCPolicy.txt";
     char polVal[5];
     char uniqName[64];
+	char enableDump[] = "       false";
 
     // check and see if we have GC policy
     // file to read the policy from
@@ -986,6 +1034,7 @@ void _initLogFile()
         #endif
         fscanf(fdPol, "%s", polVal);
         fscanf(fdPol, "%s", uniqName);
+		fscanf(fdPol, "%s", enableDump);
         fclose(fdPol);
     } else {
         // defaults
@@ -1027,6 +1076,11 @@ void _initLogFile()
          } else {
 			polNumb = DEFAULT_POLICY;
 		}
+		ALOGD("Robust Log enableDump %s",enableDump);
+		if (!strncmp(enableDump, "true", 4)) {
+			dumpHeap = true;
+			ALOGD("Robust Log Enabling Heap dumps");
+		}
     }
         
     // set up the policy we'll be executing
@@ -1058,12 +1112,16 @@ void _initLogFile()
     strcat(fileName, ".txt");
 
 	char memDup[100];
-	strcpy(memDup, baseDir);
+	char memDir[] = "/sdcard/robust_data/";
+	strcpy(memDup, memDir);
     strcat(memDup, processName);
     strcat(memDup, ".dxt");
     
     // create the directory for log files
     mkdir("/sdcard/robust", S_IRWXU | S_IRWXG | S_IRWXO);
+
+	// create the directory for data files
+    mkdir("/sdcard/robust_data", S_IRWXU | S_IRWXG | S_IRWXO);
 
     #ifdef snappyDebugging
     ALOGD("Robust Log ||%s||", fileName);
@@ -1186,11 +1244,38 @@ void computePartialFull(void)
 		numIterations = 100;
 }
 
+/*
+ * save pointer address, and size
+ */
+void savePtr(void *ptr, size_t size)
+{
+	size_t tmp = (((size_t)(ptr)) - 0);
+	if (tmp < minAdd)
+		minAdd = tmp;
+	if (tmp + size > maxAdd)
+		maxAdd = tmp + size;
+}
+
+void saveHeap(void) 
+{
+	ALOGD("Robust Log Starting dump");
+	if (dumpHeap)
+		dlmalloc_inspect_all(memDumpHandler, NULL);
+	ALOGD("Robust Log Finishing dump");
+}
+
 void memDumpHandler(void* start, void* end, size_t used_bytes,
                                 void* arg)
 {
-	if (memDumpFile)
+	static int count = 0;
+	count ++;
+	return;
+	if (memDumpFile) {
+		ALOGD("Heap %p %p %u\n", start, end, used_bytes);
 		fprintf(memDumpFile,"%p %p %u\n", start, end, used_bytes);
+		if (count > 1000)
+			fflush(memDumpFile);
+	}			
 }
 
 /*
@@ -1198,7 +1283,9 @@ void memDumpHandler(void* start, void* end, size_t used_bytes,
  */ 
 void writeThreshold(void) {
 	char threshFileName[128];
-	char baseDir[] = "/sdcard/robust/";
+	char baseDir[] = "/sdcard/robust_data/";
+
+	//mkdir("/sdcard/robust_data", 0777);
     strcpy(threshFileName, baseDir);
     strcat(threshFileName, thisProcessName);
 	strcat(threshFileName, "_thresh\0");
@@ -1214,11 +1301,11 @@ void writeThreshold(void) {
 
 void readThreshold(void) {
 	char threshFileName[128];
-	char baseDir[] = "/sdcard/robust/";
+	char baseDir[] = "/sdcard/robust_data/";
     strcpy(threshFileName, baseDir);
     strcat(threshFileName, thisProcessName);
 	strcat(threshFileName, "_thresh\0");
-    strcat(threshFileName, ".gxt");
+    strcat(threshFileName, ".txt");
 	
 	FILE *tFile = fopen(threshFileName, "rt");
 	
@@ -1479,6 +1566,10 @@ float avgPercFreedFull;
 size_t numBytesFreedLog;
 size_t objsFreed;
 size_t lastAllocSize;
+size_t minAdd;
+size_t maxAdd;
+bool dumpHeap = false;
+
 
 size_t lastRequestedSize = 0;
 //string processName;
@@ -1489,5 +1580,6 @@ int freeHistory[10] =
 	 CONCURRENT_START_DEFAULT,
 	 CONCURRENT_START_DEFAULT}; // histogram
 size_t threshold; // threshold for starting concurrent GC
+size_t freeExhaust;
 u8 lastGCTime = 0; // for scheduling GCs
 u8 lastGCCPUTime = 0;
