@@ -361,7 +361,7 @@ static bool doLoopBodyCodeMotion(CompilationUnit *cUnit)
             dvmGetDexOptAttributes(&mir->dalvikInsn);
 
         /* Skip extended MIR instructions */
-        if (dInsn->opcode >= kNumPackedOpcodes) continue;
+        if ((u2) dInsn->opcode >= kNumPackedOpcodes) continue;
 
         int instrFlags = dexGetFlagsFromOpcode(dInsn->opcode);
 

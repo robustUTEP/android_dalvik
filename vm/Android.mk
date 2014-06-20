@@ -57,7 +57,7 @@ include $(LOCAL_PATH)/ReconfigureDvm.mk
 LOCAL_MODULE := libdvm
 LOCAL_CFLAGS += $(target_smp_flag)
 ifeq ($(TARGET_ARCH_LOWMEM),true)
-    LOCAL_CFLAGS += -DDALVIK_LOWMEM
+  LOCAL_CFLAGS += -DDALVIK_LOWMEM
 endif
 
 # Define WITH_ADDRESS_SANITIZER to build an ASan-instrumented version of the
@@ -126,7 +126,7 @@ ifeq ($(WITH_HOST_DALVIK),true)
     WITH_JIT := true
     include $(LOCAL_PATH)/Dvm.mk
 
-    LOCAL_SHARED_LIBRARIES += libcrypto libssl libicuuc libicui18n
+    LOCAL_SHARED_LIBRARIES += libnativehelper libcrypto-host libssl-host libicuuc-host libicui18n-host
 
     LOCAL_LDLIBS := -lpthread -ldl
     ifeq ($(HOST_OS),linux)
@@ -154,7 +154,7 @@ ifeq ($(WITH_HOST_DALVIK),true)
     # TODO: split out the asflags.
     LOCAL_ASFLAGS := $(LOCAL_CFLAGS)
     ifeq ($(TARGET_ARCH_LOWMEM),true)
-        LOCAL_CFLAGS += -DDALVIK_LOWMEM
+      LOCAL_CFLAGS += -DDALVIK_LOWMEM
     endif
     LOCAL_MODULE_TAGS := optional
     LOCAL_MODULE := libdvm

@@ -287,6 +287,10 @@ struct Thread {
     bool        cpuClockBaseSet;
     u8          cpuClockBase;
 
+    /* previous stack trace sample and length (used by sampling profiler) */
+    const Method** stackTraceSample;
+    size_t stackTraceSampleLength;
+
     /* memory allocation profiling state */
     AllocProfState allocProf;
 
@@ -358,6 +362,7 @@ enum SuspendCause {
     SUSPEND_FOR_DEX_OPT,
     SUSPEND_FOR_VERIFY,
     SUSPEND_FOR_HPROF,
+    SUSPEND_FOR_SAMPLING,
 #if defined(WITH_JIT)
     SUSPEND_FOR_TBL_RESIZE,  // jit-table resize
     SUSPEND_FOR_IC_PATCH,    // polymorphic callsite inline-cache patch
@@ -602,5 +607,12 @@ void dvmDumpAllThreadsEx(const DebugOutputTarget* target, bool grabLock);
  * in an uncertain state.
  */
 void dvmNukeThread(Thread* thread);
+
+/*
+ * Sets the thread's name as pointed to by threadName in task_struct->comm.
+ * Note this field has a limited width, and larger values will be truncated
+ * to this width starting from the end.
+ */
+void dvmSetThreadName(const char *threadName);
 
 #endif  // DALVIK_THREAD_H_

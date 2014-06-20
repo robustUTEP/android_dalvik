@@ -95,7 +95,7 @@ public final class FieldIdsSection extends MemberIdsSection {
      * @param field {@code non-null;} the reference to intern
      * @return {@code non-null;} the interned reference
      */
-    public FieldIdItem intern(CstFieldRef field) {
+    public synchronized FieldIdItem intern(CstFieldRef field) {
         if (field == null) {
             throw new NullPointerException("field == null");
         }

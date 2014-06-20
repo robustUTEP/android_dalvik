@@ -284,6 +284,7 @@ static void genMultiplyByShiftAndReverseSubtract(CompilationUnit *cUnit,
     opRegRegReg(cUnit, kOpSub, rlResult.lowReg, tReg, rlSrc.lowReg);
 }
 
+#ifndef WITH_QC_PERF
 /*
  * Generate array load
  */

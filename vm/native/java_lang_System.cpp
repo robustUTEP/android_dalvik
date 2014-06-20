@@ -62,6 +62,10 @@
  * TODO: use __builtin_prefetch
  * TODO: write an ARM-optimized version
  */
+#if defined(HAVE_HALFWORD_ATOMIC_MEMMOVE)
+#define move16 memmove
+#define move32 memmove
+#else
 static void memmove_words(void* dest, const void* src, size_t n) {
     assert((((uintptr_t) dest | (uintptr_t) src | n) & 0x01) == 0);
 
@@ -177,6 +181,7 @@ static void memmove_words(void* dest, const void* src, size_t n) {
 
 #define move16 memmove_words
 #define move32 memmove_words
+#endif
 
 /*
  * public static void arraycopy(Object src, int srcPos, Object dest,
@@ -360,37 +365,38 @@ static void Dalvik_java_lang_System_arraycopy(const u4* args, JValue* pResult)
 }
 
 /*
- * static long currentTimeMillis()
+ * public static void arraycopyCharUnchecked(char[] src, int srcPos, char[] dest,
+ *      int destPos, int length)
  *
- * Current time, in miliseconds.  This doesn't need to be internal to the
- * VM, but we're already handling java.lang.System here.
+ * This is a char[] specialized, native, unchecked version of
+ * arraycopy(). This assumes error checking has been done.
  */
-static void Dalvik_java_lang_System_currentTimeMillis(const u4* args,
-    JValue* pResult)
+static void Dalvik_java_lang_System_arraycopyCharUnchecked(const u4* args, JValue* pResult)
 {
-    struct timeval tv;
-
-    UNUSED_PARAMETER(args);
-
-    gettimeofday(&tv, (struct timezone *) NULL);
-    long long when = tv.tv_sec * 1000LL + tv.tv_usec / 1000;
-
-    RETURN_LONG(when);
-}
-
-/*
- * static long nanoTime()
- *
- * Current monotonically-increasing time, in nanoseconds.  This doesn't
- * need to be internal to the VM, but we're already handling
- * java.lang.System here.
- */
-static void Dalvik_java_lang_System_nanoTime(const u4* args, JValue* pResult)
-{
-    UNUSED_PARAMETER(args);
-
-    u8 when = dvmGetRelativeTimeNsec();
-    RETURN_LONG(when);
+    ArrayObject* srcArray = (ArrayObject*) args[0];
+    int srcPos = args[1];
+    ArrayObject* dstArray = (ArrayObject*) args[2];
+    int dstPos = args[3];
+    int length = args[4];
+    assert(srcArray != NULL);
+    assert(dstArray != NULL);
+    assert(dvmIsArray(srcArray));
+    assert(dvmIsArray(dstArray));
+    assert(srcPos >= 0 && dstPos >= 0 && length >= 0 &&
+           srcPos + length <= (int) srcArray->length &&
+           dstPos + length <= (int) dstArray->length);
+#ifndef NDEBUG
+    ClassObject* srcClass = srcArray->clazz;
+    ClassObject* dstClass = dstArray->clazz;
+    char srcType = srcClass->descriptor[1];
+    char dstType = dstClass->descriptor[1];
+    assert(srcType == 'C' && dstType == 'C');
+#endif
+    /* 2 bytes per element */
+    move16((u1*) dstArray->contents + dstPos * 2,
+           (const u1*) srcArray->contents + srcPos * 2,
+           length * 2);
+    RETURN_VOID();
 }
 
 /*
@@ -407,41 +413,12 @@ static void Dalvik_java_lang_System_identityHashCode(const u4* args,
     RETURN_INT(dvmIdentityHashCode(thisPtr));
 }
 
-static void Dalvik_java_lang_System_mapLibraryName(const u4* args,
-    JValue* pResult)
-{
-    StringObject* nameObj = (StringObject*) args[0];
-    StringObject* result = NULL;
-    char* name;
-    char* mappedName;
-
-    if (nameObj == NULL) {
-        dvmThrowNullPointerException("userLibName == null");
-        RETURN_VOID();
-    }
-
-    name = dvmCreateCstrFromString(nameObj);
-    mappedName = dvmCreateSystemLibraryName(name);
-    if (mappedName != NULL) {
-        result = dvmCreateStringFromCstr(mappedName);
-        dvmReleaseTrackedAlloc((Object*) result, NULL);
-    }
-
-    free(name);
-    free(mappedName);
-    RETURN_PTR(result);
-}
-
 const DalvikNativeMethod dvm_java_lang_System[] = {
     { "arraycopy",          "(Ljava/lang/Object;ILjava/lang/Object;II)V",
         Dalvik_java_lang_System_arraycopy },
-    { "currentTimeMillis",  "()J",
-        Dalvik_java_lang_System_currentTimeMillis },
+    { "arraycopyCharUnchecked", "([CI[CII)V",
+        Dalvik_java_lang_System_arraycopyCharUnchecked },
     { "identityHashCode",  "(Ljava/lang/Object;)I",
         Dalvik_java_lang_System_identityHashCode },
-    { "mapLibraryName",     "(Ljava/lang/String;)Ljava/lang/String;",
-        Dalvik_java_lang_System_mapLibraryName },
-    { "nanoTime",  "()J",
-        Dalvik_java_lang_System_nanoTime },
     { NULL, NULL, NULL },
 };

@@ -1,4 +1,3 @@
-
 /*
  * Copyright (C) 2008 The Android Open Source Project
  *
@@ -29,18 +28,17 @@
 #include "alloc/HeapSource.h"
 #include "alloc/MarkSweep.h"
 #include "os/os.h"
+#include <sys/mman.h>
 #include "hprof/Hprof.h"
-
-#include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/time.h>
 #include <limits.h>
 #include <errno.h>
-#include <cutils/process_name.h>
-#include <cutils/properties.h>
-
-
 #include <cutils/trace.h>
-#include <cutils/properties.h>
+#include <cutils/process_name.h>
+
+#ifdef HAVE_ANDROID_OS
+#include "cutils/properties.h"
 
 static int debugalloc()
 {
@@ -48,6 +46,9 @@ static int debugalloc()
     property_get("dalvik.vm.debug.alloc", value, "0");
     return atoi(value);
 }
+#else
+inline static int debugalloc() { return 1; }
+#endif
 
 static const GcSpec kGcForMallocSpec = {
     true,  /* isPartial */
@@ -195,11 +196,13 @@ static void gcForMalloc(bool clearSoftReferences)
  */
 static void *tryMalloc(size_t size)
 {
+#ifdef HAVE_ANDROID_OS
+    char prop_value[PROPERTY_VALUE_MAX] = {'\0'};
+#endif
+    char* hprof_file = NULL;
     void *ptr;
     int result = -1;
-    char* hprof_file = NULL;
-    char prop_value[PROPERTY_VALUE_MAX] = {'\0'};
-
+    int debug_oom = 0;
 //TODO: figure out better heuristics
 //    There will be a lot of churn if someone allocates a bunch of
 //    big objects in a row, and we hit the frag case each time.
@@ -214,7 +217,6 @@ static void *tryMalloc(size_t size)
     if (ptr != NULL) {
         return ptr;
     }
-
     /*
      * The allocation failed.  If the GC is running, block until it
      * completes and retry.
@@ -254,7 +256,6 @@ static void *tryMalloc(size_t size)
                 FRACTIONAL_MB(newHeapSize), size);
         return ptr;
     }
-
     /* Most allocations should have succeeded by now, so the heap
      * is really full, really fragmented, or the requested size is
      * really big.  Do another GC, collecting SoftReferences this
@@ -275,10 +276,12 @@ static void *tryMalloc(size_t size)
 //TODO: tell the HeapSource to dump its state
     dvmDumpThread(dvmThreadSelf(), false);
 
+#ifdef HAVE_ANDROID_OS
     /* Read the property to check whether hprof should be generated or not */
     property_get("dalvik.debug.oom",prop_value,"0");
-
-    if(atoi(prop_value) == 1) {
+    debug_oom = atoi(prop_value);
+#endif
+    if(debug_oom == 1) {
         LOGE_HEAP("Generating hprof for process: %s PID: %d",
                     get_process_name(),getpid());
         dvmUnlockHeap();
@@ -304,7 +307,6 @@ static void *tryMalloc(size_t size)
                       "Generating hprof in default file: /data/misc/app_oom.hprof");
             result = hprofDumpHeap("/data/misc/app_oom.hprof", -1, false);
         }
-
         dvmLockMutex(&gDvm.gcHeapLock);
 
         if (result != 0) {
@@ -314,7 +316,6 @@ static void *tryMalloc(size_t size)
             LOGE_HEAP(" hprofDumpHeap failed with result: %d ",result);
         }
     }
-
     return NULL;
 }
 
