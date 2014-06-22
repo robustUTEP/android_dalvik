@@ -31,7 +31,10 @@ enum HeapSourceValueSpec {
     HS_FOOTPRINT,
     HS_ALLOWED_FOOTPRINT,
     HS_BYTES_ALLOCATED,
-    HS_OBJECTS_ALLOCATED
+    HS_OBJECTS_ALLOCATED,
+    HS_VM_SIZE,
+  	HS_LIMIT,
+  	HS_BASE
 };
 
 /*
@@ -210,4 +213,10 @@ void dvmHeapSourceRegisterNativeAllocation(int bytes);
  */
 void dvmHeapSourceRegisterNativeFree(int bytes);
 
+
+/*
+ * Initiates concurrent Garbage collection
+ * Used for kicking off GC outside of heapsource
+ */
+void dvmInitConcGC(void);
 #endif  // DALVIK_HEAP_SOURCE_H_

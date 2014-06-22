@@ -28,6 +28,7 @@
 #include "alloc/HeapSource.h"
 #include "alloc/HeapBitmap.h"
 #include "alloc/HeapBitmapInlines.h"
+#include "alloc/Logging.h"
 
 static void dvmHeapSourceUpdateMaxNativeFootprint();
 static void snapIdealFootprint();
@@ -845,6 +846,15 @@ size_t dvmHeapSourceGetValue(HeapSourceValueSpec spec, size_t perHeapStats[],
             break;
         case HS_OBJECTS_ALLOCATED:
             value = heap->objectsAllocated;
+            break;        
+        case HS_VM_SIZE:
+            value = heap->limit - heap->base;
+            break;
+        case HS_BASE:
+            value = (size_t) (heap->base - 0);
+            break;
+        case HS_LIMIT:
+            value = (size_t) (heap->limit - 0);
             break;
         default:
             // quiet gcc
@@ -1010,7 +1020,7 @@ void* dvmHeapSourceAlloc(size_t n)
          */
         return ptr;
     }
-    if (heap->bytesAllocated > heap->concurrentStartBytes) {
+    if ((policyNumber == 1) && (heap->bytesAllocated > heap->concurrentStartBytes)) {
         /*
          * We have exceeded the allocation threshold.  Wake up the
          * garbage collector.
@@ -1677,4 +1687,13 @@ void dvmHeapSourceRegisterNativeFree(int bytes)
         }
     } while (android_atomic_cas(expected_size, new_size,
                                 &gHs->nativeBytesAllocated));
+}
+
+/*
+ * Kickoff GC from external source
+ */
+void dvmInitConcGC(void)
+{
+    dvmSignalCond(&gHs->gcThreadCond);
+    return;
 }
