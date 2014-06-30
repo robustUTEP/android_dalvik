@@ -476,7 +476,6 @@ static void genMultiplyByTwoBitMultiplier(CompilationUnit *cUnit,
     }
 }
 
-#ifndef WITH_QC_PERF
 static void genMultiplyByShiftAndReverseSubtract(CompilationUnit *cUnit,
         RegLocation rlSrc, RegLocation rlResult, int lit)
 {
