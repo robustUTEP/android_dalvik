@@ -22,7 +22,7 @@
 #include "sched.h"
 #include "alloc/DlMalloc.h"
 
-#define BUILD_ID "061914-2130-logOthers-noDalvik-saveStats"
+#define BUILD_ID "070214-2130-logOthers-noDalvik-saveStats"
 #define CONCURRENT_START_DEFAULT (128 << 10)
 #define NUM_GC_AVERAGES 10
 #define DEFAULT_POLICY 13
@@ -42,6 +42,9 @@ u8 currentMallocTime = 0;
 u8 rootScanTime = 0;
 u8 gcStartTime; // start time of the last GC
 u8 lastExhaustion;
+size_t allocHistory[] = {0,0,0};
+size_t hares[] = {0,0,0};
+int currAllocHistory = 0;
 int currInterval = 0;
 bool threshSet;
 struct timespec startTime;
@@ -341,6 +344,24 @@ static GcPolSpec GcPolRT4 = {
 
 GcPolSpec *RT4 = &GcPolRT4;
 
+static GcPolSpec GcPolSpleen2 = {
+	"HareySpleen",
+	15,		// Policy Number
+	4000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	1,		// adaptive
+	0,		// resize threshold on GC
+	false,	// resize heap on gc
+	10,		// time to add
+	15,		// time to wait
+	50,		// number of iterations to wait	
+	.2,		// alpha for partial gc average
+	.5,		// alpha for full gc average
+	1		// beta
+};
+
+GcPolSpec *Spleen2 = &GcPolSpleen2;
+
 const GcPolSpec policies[NUM_POLICIES] = {stockPol, 
 										  GcPolMI2, 
 										  GcPolMI2S, 
@@ -354,7 +375,8 @@ const GcPolSpec policies[NUM_POLICIES] = {stockPol,
 										  GcPolMMI1D, 
 										  GcPolRT1, 
 										  GcPolRT2,
-										  GcPolRT4};
+										  GcPolRT4,
+										  GcPolSpleen2};
 GcPolSpec policy;
 
 /*
@@ -421,6 +443,7 @@ void logGC(const GcSpec* spec)
             thisGCSeqNumb = seqNumber++;
             logStage = 1;
 			rootScanTime = 0;
+			lastGCSeqNumber = thisGCSeqNumb;
             break;
         case 1:
             logStage = 2;
@@ -441,7 +464,6 @@ void logMalloc(bool mallocFail)
     static int thisMallocSeqNumb;
     static int maxMallocs = 2000;
     static int numChecks = 0;
-	static int counts = 0;
     string beginOrEnd;
 
     static u8 lastMallocTime = 0;
@@ -486,10 +508,7 @@ void logMalloc(bool mallocFail)
 				mallocsDone = 0;
 
 				// if we've run over a second
-				counts++;
-				if (counts > 10) {
-					timed();
-				}
+			    timed();
             }
         }
         numMallocs++;
@@ -498,6 +517,12 @@ void logMalloc(bool mallocFail)
         beginOrEnd = "end";
         logStart = true;
         writeLogEvent(LOG_TRY_MALLOC, beginOrEnd.c_str(), "TryMalloc", thisMallocSeqNumb, NULL);
+        
+        // write out the hares
+        char custMsg[128];
+        sprintf(custMsg, ",\"hare0\":%zu,\"hare1\":%zu,\"hare2\":%zu",hares[0],hares[1],hares[2]);
+        hares[0] = hares[1] = hares[2] = 0;
+        logPrint(LOG_CUSTOM,"hareSize", (char*)custMsg);
     }
     
 }
@@ -583,7 +608,8 @@ void buildHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, c
 
     buildBasicEvent(beginEnd, eventName, seqNumber, partial);
 
-    sprintf(output, "%s,\"currAlloc0-kB\":%d,\"currFootprint0-kB\":%d,\"currLimit0-kB\":%d,\"currMax0-kB\":%d,\"numObjects0\":%d,\"minAdd0\":%d,\"maxAdd0\":%d,\"arenaSize0\":%d,\"currAlloc1-kB\":%d,\"currFootprint1-kB\":%d,\"currLimit1-kB\":%d,\"currMax1-kB\":%d,\"numObjects1\":%d,\"threshold-kB\":%f",
+    sprintf(output, "%s,\"currAlloc0-kB\":%d,\"currFootprint0-kB\":%d,\"currLimit0-kB\":%d,\"currMax0-kB\":%d,\"numObjects0\":%d,\"minAdd0\":%d,\"maxAdd0\":%d,\"arenaSize0\":%d,"
+                    "\"currAlloc1-kB\":%d,\"currFootprint1-kB\":%d,\"currLimit1-kB\":%d,\"currMax1-kB\":%d,\"numObjects1\":%d,\"threshold-kB\":%f,\"totalAlloced-kB\":%zu",
         partial, 
 		heapsAlloc[0], 
 		heapsFootprint[0], 
@@ -598,7 +624,8 @@ void buildHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, c
 		heapsLimit[1],
 		heapsMax[1], 
 		numObjects[1], 
-		thresholdKb);
+		thresholdKb,
+		totalAlloced);
 }
 
 /*
@@ -611,8 +638,8 @@ void buildGCEvent(const char* beginEnd,const char* eventName, int seqNumber, con
     char cpuSpeed[] = "noData ";
     logCPUSpeed(cpuSpeed);
 
-    sprintf(output, "%s,\"GCType\":\"%s\",\"cpuSpeed-Hz\":\"%s\",\"rootScanTime\":%llu,\"bytesFreed-kb\":%f,\"objectsFreed\":%u,\"numIterations\":%u",
-        partial, spec->reason, cpuSpeed, rootScanTime, numBytesFreedLog / 1024.0, objsFreed, numIterations);
+    sprintf(output, "%s,\"GCType\":\"%s\",\"cpuSpeed-Hz\":\"%s\",\"rootScanTime\":%llu,\"bytesFreed-kb\":%f,\"objectsFreed\":%u,\"numIterations\":%u,\"spleenSize-kb\":%zu",
+        partial, spec->reason, cpuSpeed, rootScanTime, numBytesFreedLog / 1024.0, objsFreed, numIterations, (spleenSize / 1024));
 }
 
 /*
@@ -636,7 +663,7 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
 {
     char partialEntry[MAX_STRING_LENGTH];
     static int numLogEvents = 0;
-//	static int numWrites = 0;
+    int GCSeqNumb = 0;
 	#ifdef logWriteTime
 	char before[256];
 	char after[256];
@@ -644,9 +671,6 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
 	u8 afterWrite;
 	#endif	
 	
-	//before = (char *)malloc(sizeof(char) * 256);
-	//after = (char *)malloc(sizeof(char) * 256);
-
     // to keep compiler quiet
     numLogEvents = numLogEvents;
 
@@ -661,7 +685,15 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
         case LOG_TRY_MALLOC:
                 char temp[MAX_STRING_LENGTH];
                 buildHeapEvent(beginEnd, eventName, seqNumber, temp);
-                sprintf(partialEntry, "%s,\"mallocFail\":\"%d\",\"numMallocs\":%d,\"lastAllocSize-B\":%d", temp, (int)mallocFail, mallocsDone,lastAllocSize);
+                if (lastState > 0)
+                    GCSeqNumb = lastGCSeqNumber;
+                sprintf(partialEntry, "%s,\"mallocFail\":\"%d\",\"numMallocs\":%d,\"lastAllocSize-B\":%d,\"lastEvent\":%d,\"lastGCSeq\":%d"
+                        ,temp
+                        ,(int)mallocFail
+                        ,mallocsDone
+                        ,lastAllocSize
+                        ,lastState
+                        ,GCSeqNumb);
                 break;
         case LOG_GC:
                 buildGCEvent(beginEnd, eventName, seqNumber, spec, partialEntry);
@@ -678,7 +710,7 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
 	beforeWrite = dvmGetRTCTimeMsec();
 	#endif
     fprintf(fileLog, "%s%s}\n", logPrefix, partialEntry);
-	#ifdef snappyDebugging
+	#ifdef snappyDebugging //tmp renable 
 	fflush(fileLog);
 	#endif
 	#ifdef logWriteTime
@@ -691,20 +723,6 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
 			after);
 	#endif
 	
-	// every so often we need to close and open
-	// the file to clear the attic
-//	numWrites++;
-//	if (numWrites > 100) {
-
-//		if ((fileLog != others) && fileLog) {
-//				fclose(fileLog);
-//				fileLog = NULL;
-//		}
-//		if (fileLog == NULL) {
-//			fileLog = fopen(fileName,"at");
-//		}
-//		numWrites = 0;
-//	}
 	numLogEvents++;
 }
 
@@ -730,7 +748,8 @@ void scheduleConcurrentGC()
             heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = 0;
 
             dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, heapsAlloc, 2);
-            dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
+            //dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
+            heapsFootprint[0] = maxAdd - minAdd;
 
             if ((threshold >= (heapsFootprint[0] - heapsAlloc[0])) || schedGC) {
             logPrint(LOG_GC_SCHED);
@@ -787,12 +806,18 @@ void saveHistory()
             scheduleConcurrentGC();
             
             // save the current free space
-            size_t heapsAlloc[2], heapsFootprint[2];
+            size_t heapsAlloc[2], heapsFootprint[2], heapsArenas[2];
+            int tmp;
             heapsAlloc[1] = heapsFootprint[1] = heapsAlloc[0] = heapsFootprint[0] = 0;
 
             dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, heapsAlloc, 2);
-            dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
-            freeHistory[currInterval] = heapsFootprint[0] - heapsAlloc[0];
+            //dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
+            heapsArenas[0] = maxAdd - minAdd;
+            tmp = heapsArenas[0] - heapsAlloc[0];
+            if (tmp < 0) {
+                tmp = tmp * -1;
+            }
+            freeHistory[currInterval] = tmp;
             currInterval = (currInterval + 1) % intervals;
             
             // set this time as the last save time
@@ -877,6 +902,7 @@ void adjustThreshold()
 			,(firstExhaustSinceGC ? "true" : "false")
 			,freeHistory[0],freeHistory[1],freeHistory[2],freeHistory[3],freeHistory[4]);
 	logPrint(LOG_CUSTOM,"debugLogAdjustNumbs", (char*)custMsg);
+	free(custMsg);
 
 	// if there hasn't been an exhaustion since GC
 	// then we shrink the threshold
@@ -950,11 +976,6 @@ void _initLogFile()
         //testTime();
         fileTest = fopen("/sdcard/robust/testFile.txt", "at" );
         notLogged = fopen("/sdcard/robust/notLogged.txt", "at" );
-        if (fileTest != NULL) {
-            ALOGD("Robust Test file open successful");
-        } else {
-            ALOGD("Robust Log Test fail open /sdcard/robust/testFile.txt %s",strerror(errno));
-        }
         return;
     } 
     if (!strncmp(processName, "dexopt", 6)
@@ -1087,7 +1108,7 @@ void _initLogFile()
     // read the numbers from the list we have stored
     setPolicy(polNumb);
     ALOGD("Robust Log policy Number %d", policyNumber);
-        ALOGD("MinGCTime %d", minGCTime);
+    ALOGD("MinGCTime %d", minGCTime);
     
     if (skipLogging) {
         return;
@@ -1177,6 +1198,7 @@ void logMeInit()
 void logCPUSpeed(char* speed)
 {
     char cpuFileName[] = "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq";
+    static bool errorLogged = false;
     FILE* cpuFile = fopen(cpuFileName, "rt" );
 
     if (cpuFile && fscanf(cpuFile, "%s", speed)) {
@@ -1184,7 +1206,10 @@ void logCPUSpeed(char* speed)
     }
     else {
         speed = (char *)"00000\0";
-        ALOGD("Robust Log Failed to open CPU speed file: %s",strerror(errno));
+        if (!errorLogged) {
+            ALOGD("Robust Log Failed to open CPU speed file: %s",strerror(errno));
+            errorLogged = true;
+        }
     }
     
 }
@@ -1216,6 +1241,11 @@ int continousGC(const GcSpec* spec)
  */
 void setPolicy(int policyNumb)
 {
+    lastGCSeqNumber = 0;
+    spleen = NULL;
+    spleenSize = 0;
+    totalAlloced = 0;
+    
 	policy = policies[policyNumb - 1];
 
 	policyNumber = policy.policyNumber;
@@ -1258,10 +1288,11 @@ void savePtr(void *ptr, size_t size)
 
 void saveHeap(void) 
 {
-	ALOGD("Robust Log Starting dump");
-	if (dumpHeap)
+	if (dumpHeap) {
+	    ALOGD("Robust Log Starting dump");
 		dlmalloc_inspect_all(memDumpHandler, NULL);
-	ALOGD("Robust Log Finishing dump");
+	    ALOGD("Robust Log Finishing dump");
+	}
 }
 
 void memDumpHandler(void* start, void* end, size_t used_bytes,
@@ -1315,16 +1346,65 @@ void readThreshold(void) {
 		}
 		fclose(tFile);
 	}
+	// check to avoid bad thresholds from data corruption
+	// if the threshold is too large or small set it to default
+	// Min is 100 bytes Max is 10 meg
+	ALOGD("Robust Log Threshold before check %d", threshold);
+	if ((threshold < 100) || (threshold > (1024 * 1024 * 10))) {
+	    threshold = CONCURRENT_START_DEFAULT;
+	}
+	ALOGD("Robust Log Threshold after check %d", threshold);
 }
 
 void timed(void) 
 {
 	static int seconds = 0;
-	if (seconds ==10) {
-		writeThreshold();
-		seconds = 0;
+	static int tenths = 0;
+	static size_t currTick = 0;
+
+    currTick++;	
+	// get alloc rate over last 200ish ms
+	size_t allocDelta = allocHistory[currAllocHistory] - allocHistory[(currAllocHistory + 1) % 3];
+	
+	// save current alloc history and increment count
+	currAllocHistory = (currAllocHistory + 1) % 3;
+	allocHistory[currAllocHistory] = totalAlloced;
+	//ALOGD("Robust Log currAlloc History %d, %d, %d, %d, %d"
+//	    ,currAllocHistory
+//	    ,allocHistory[0]
+//	    ,allocHistory[1]
+//	    ,allocHistory[2]
+//	    ,(currAllocHistory + 1) % 3);
+    //ALOGD("Robust Log Spleen Size %zu, Delta %zu", spleenSize, allocDelta);
+	
+	// wait 15 seconds to avoid startup behaviour
+	if (currTick > 150) {
+	    // if our delta is bigger than the current spleen size, change the spleen size
+	    if (spleenSize < allocDelta) {
+	        size_t heapsFootprint[2];
+	        dvmHeapSourceGetValue(HS_FOOTPRINT, heapsFootprint, 2);
+	        if (allocDelta < (heapsFootprint[0] * .1)) {
+	            spleenSize = allocDelta;
+	        } else {
+	            spleenSize = heapsFootprint[0] * .1;
+	        }
+	    }
+	
+	    //ALOGD("Robust Log Spleen Size after adjust %zu, Delta %zu", spleenSize, allocDelta);
 	}
-	seconds++;
+	
+	
+	if (tenths == 10) {
+	    // stuff that needs to happen every second goes here
+	    if (seconds == 10) {
+	        // stuff that needs to happen every 10 seconds goes here
+		    writeThreshold();
+		    seconds = 0;
+	    }
+	    seconds++;
+	    tenths = 0;
+    }
+    tenths++;
 }
 /***************************************************
  * Utility functions below
@@ -1558,6 +1638,7 @@ unsigned int resizeThreshold;
 unsigned short timeToWait;
 unsigned short numIterations;
 unsigned short currIterations;
+int lastState;
 float partialAlpha;
 float fullAlpha;
 float beta;
@@ -1569,6 +1650,11 @@ size_t lastAllocSize;
 size_t minAdd;
 size_t maxAdd;
 bool dumpHeap = false;
+int lastGCSeqNumber;
+void* spleen;
+size_t spleenSize;
+size_t currSpleenSize;
+size_t totalAlloced;
 
 
 size_t lastRequestedSize = 0;

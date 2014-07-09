@@ -11,19 +11,28 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define NUM_POLICIES 14
+#define NUM_POLICIES 15
 #define LOG_CUSTOM 0
 #define LOG_TRY_MALLOC 1
 #define LOG_GC 2
 #define LOG_WAIT_CONC_GC 3
 #define LOG_GC_SCHED 4
 #define LOG_IGNORE_EXPLICIT 5
-#define MAX_STRING_LENGTH 512
+#define MAX_STRING_LENGTH 768
+
+#define DID_NOTHING 0
+#define SCHED_GC 1
+#define PRED_LONG 2
+#define TIMEOUT 3
+#define SUCCESS 4
+#define RELEASE_SPLEEN 5
+#define GROW_AND_GO 6
 
 #define dvmGetThreadCpuTimeMsec() (dvmGetThreadCpuTimeNsec() / 1000000)
 using namespace std;
 
 extern int seqNumber;
+extern int lastGCSeqNumber;
 extern bool logReady;
 extern FILE* fileLog;
 extern string policyName;
@@ -69,6 +78,12 @@ static int preinit = 0; // if we're an initialization process (ie zygote or sys 
 extern size_t numBytesFreedLog;
 extern size_t objsFreed;
 extern size_t lastAllocSize;
+extern int lastState;
+extern void* spleen;
+extern size_t spleenSize;
+extern size_t currSpleenSize;
+extern size_t totalAlloced;
+extern size_t hares[4];
 
 // get current RTC time
 u8 dvmGetRTCTimeNsec(void);
@@ -105,9 +120,10 @@ inline void logPrint(int logEventType, const GcSpec* spec, size_t numBytesFreed,
     objsFreed = 0;
 }
 
-inline void logPrint(int logEventType, bool mallocFail, size_t allocSize, int dummy)
+inline void logPrint(int logEventType, bool mallocFail, size_t allocSize, int state)
 {
 	lastAllocSize = allocSize;
+	lastState = state;
     logPrint(logEventType, mallocFail, NULL);
 }
 

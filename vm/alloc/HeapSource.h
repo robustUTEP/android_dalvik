@@ -219,4 +219,10 @@ void dvmHeapSourceRegisterNativeFree(int bytes);
  * Used for kicking off GC outside of heapsource
  */
 void dvmInitConcGC(void);
+
+/*
+ * Used to free a spleen
+ */
+void dvmFreeSpleen(void* spleen);
+
 #endif  // DALVIK_HEAP_SOURCE_H_

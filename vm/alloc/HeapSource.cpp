@@ -1697,3 +1697,23 @@ void dvmInitConcGC(void)
     dvmSignalCond(&gHs->gcThreadCond);
     return;
 }
+
+/*
+ * Used to free a spleen
+ */
+void dvmFreeSpleen(void* spleen)
+{
+    #ifdef snappyDebugging
+    ALOGD("Robust Log Freeing Spleen %zu, value %p", currSpleenSize, spleen);
+    #endif
+    size_t freed = 0;
+    if (spleen) {
+        void *list[1];
+        list[0] = spleen;
+        freed = dvmHeapSourceFreeList(1, list);
+    }
+    spleen = NULL;
+    #ifdef snappyDebugging
+    ALOGD("Robust Log Freed Spleen %zu, value %p", freed, spleen);
+    #endif
+}

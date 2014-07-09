@@ -37,12 +37,12 @@
 #include <cutils/trace.h>
 #include <cutils/process_name.h>
 
-#ifdef HAVE_ANDROID_OS
-#include "cutils/properties.h"
-
 // Snappy additions
 #include "alloc/Logging.h"
 #include "alloc/DlMalloc.h"
+
+#ifdef HAVE_ANDROID_OS
+#include "cutils/properties.h"
 
 static int debugalloc()
 {
@@ -221,11 +221,28 @@ static void *tryMalloc(size_t size)
 
     //# Snappy mod start
     logPrint(LOG_TRY_MALLOC, false, size, 0);
+    totalAlloced += size;
     int i;
+    int state = DID_NOTHING;
 
     // log history
     if (policyNumber >= 4) {
         saveHistory();
+        // log hare size
+        if (size > hares[0]) {
+            if (size > hares[1]) {
+                hares[0] = hares[1];
+                if (size > hares[2]) {
+                    hares[1] = hares[2];
+                    hares[2] = size;
+                } else {
+                    hares[1] = size;
+                }
+            } else {
+                hares[0] = size;
+            }
+        }
+                      
     }
     //# Snappy mod end
 
@@ -306,18 +323,52 @@ static void *tryMalloc(size_t size)
 			firstExhaustSinceGC = false;			
 			adjustThreshold();
 		}
+		
+		// if where running a spleeny algorithm release the spleen
+		// on exhaustion if we have one and see if it freed enough
+		// space
+		#ifdef snappyDebugging
+		ALOGD("Robust log spleen value malloc fail %p", spleen);
+		#endif
+		if ((policyNumber == 15) && (spleen != NULL)) {
+		    #ifdef snappyDebugging
+		    ALOGD("robust Log Releasing spleen on exhaustion");
+		    #endif
+		    dvmFreeSpleen(spleen);
+		    spleen = NULL;
+		    schedGC = true;
+		    
+		    // try to alloc again
+	        ptr = dvmHeapSourceAlloc(size);
+            if (ptr != NULL) {
+                logPrint(LOG_TRY_MALLOC, false, size, RELEASE_SPLEEN);
+                savePtr(ptr, size);
+                return ptr;
+            }
+            
+            // if that didn't work grow and go
+            ptr = dvmHeapSourceAllocAndGrow(size);
+            if (ptr != NULL) {
+                logPrint(LOG_TRY_MALLOC, false, size, GROW_AND_GO);
+                savePtr(ptr, size);
+                return ptr;
+            }
+        }
 
 		/*
 		 * if GC not running kick off GC, grow heap
 		 * and move on
 		 */ 
 		if (!gDvm.gcHeap->gcRunning) {
-			schedGC = true;	// allows us to schedule gc if < 2s since last
-			scheduleConcurrentGC();
+		    if (!schedGC) {
+			    schedGC = true;	// allows us to schedule gc if < 2s since last
+			    scheduleConcurrentGC();
+			    state = SCHED_GC;
+			}
 			// grow heap and move on
 			ptr = dvmHeapSourceAllocAndGrow(size);
 			if (ptr != NULL) {
-			    logPrint(LOG_TRY_MALLOC, true, size, 0);
+			    logPrint(LOG_TRY_MALLOC, true, size, state);
 				savePtr(ptr, size);
 				return ptr;
 			}
@@ -334,14 +385,14 @@ static void *tryMalloc(size_t size)
 				while (i < timeToWait) {	
 					ptr = dvmHeapSourceAlloc(size);
 					if (ptr != NULL) {
-					    logPrint(LOG_TRY_MALLOC, true, size, 0);
+					    logPrint(LOG_TRY_MALLOC, true, size, SUCCESS);
 						savePtr(ptr, size);
 						return ptr;
 					}
 					if (!gDvm.gcHeap->gcRunning) {
 						ptr = dvmHeapSourceAllocAndGrow(size);
 						if (ptr != NULL) {
-						    logPrint(LOG_TRY_MALLOC, true, size, 0);
+						    logPrint(LOG_TRY_MALLOC, true, size, SUCCESS);
 							savePtr(ptr, size);
 							return ptr;
 						}
@@ -355,14 +406,14 @@ static void *tryMalloc(size_t size)
 				// enough space so grow and move on
 				ptr = dvmHeapSourceAllocAndGrow(size);
 				if (ptr != NULL) {
-				    logPrint(LOG_TRY_MALLOC, true, size, 0);
+				    logPrint(LOG_TRY_MALLOC, true, size, TIMEOUT);
 					savePtr(ptr, size);
 					return ptr;
 				}
 			} else {
 				ptr = dvmHeapSourceAllocAndGrow(size);
 				if (ptr != NULL) {
-				    logPrint(LOG_TRY_MALLOC, true, size, 0);
+				    logPrint(LOG_TRY_MALLOC, true, size, PRED_LONG);
 					savePtr(ptr, size);
 					return ptr;
 				}
@@ -699,7 +750,22 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
         logPrint(LOG_IGNORE_EXPLICIT);
         return;
     }
-     
+    #ifdef snappyDebugging
+    ALOGD("Robust log spleen value begin GC %p", spleen);
+    #endif
+    if ((policyNumber == 15) && (spleen != NULL)) {
+        // free the spleen
+        char custMsg[256];
+        sprintf(custMsg,",\"size\":%zu"
+		    ,currSpleenSize);
+        logPrint(LOG_CUSTOM,"freeSpleen", (char*)custMsg);
+        #ifdef snappyDebugging
+        ALOGD("Robust Log Freeing Spleen size %d",currSpleenSize);
+        #endif
+        dvmFreeSpleen(spleen);
+        spleen = NULL;
+	        
+    } 
     logPrint(LOG_GC, spec);
     //# Snappy mod end
 
@@ -996,12 +1062,28 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 	}
 
 	thresholdOnGC = (currFootprintS[0] - currAllocatedS[0]);
-	/*snprintf(tmpBuf,127,",\"threshreg\":%d,\"threshSigned\":%ld",
-			threshold + (thresholdOnGC - (currFootprintS[0] - currAllocatedS[0])),
-			(long)threshold + ((long)thresholdOnGC - ((long)currFootprintS[0] - (long)currAllocatedS[0])));
-	logPrint(LOG_CUSTOM, "GCCalc",(char*)tmpBuf);*/
-
 	adjustThreshold();
+	
+	// adjust the spleen if we're running the policy
+	#ifdef snappyDebugging
+	ALOGD("Robust log spleen value end GC %p", spleen);
+	#endif
+	if (policyNumber == 15) {
+	    // if no spleen alloc a spleen growing if necessary
+	    if ((spleen == NULL) && (spleenSize > 1024)) {
+	        currSpleenSize = spleenSize;
+	        char custMsg[256];
+	        sprintf(custMsg,",\"size\":%zu"
+			,spleenSize);
+	        logPrint(LOG_CUSTOM,"allocSpleen", (char*)custMsg);
+	        #ifdef snappyDebugging
+	        ALOGD("Robust Log Alloc Spleen size %d",currSpleenSize);
+	        #endif
+	        //spleenAlloc = true;
+	        spleen = dvmHeapSourceAllocAndGrow(spleenSize);
+            //spleenAlloc = false;
+	    }
+    }
 
     /* Write GC info to log if the log's ready*/
     logPrint(LOG_GC, spec, numBytesFreed, numObjectsFreed);
