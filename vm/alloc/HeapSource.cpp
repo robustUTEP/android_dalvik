@@ -846,7 +846,8 @@ size_t dvmHeapSourceGetValue(HeapSourceValueSpec spec, size_t perHeapStats[],
             break;
         case HS_OBJECTS_ALLOCATED:
             value = heap->objectsAllocated;
-            break;        
+            break;
+        // snappy mod start        
         case HS_VM_SIZE:
             value = heap->limit - heap->base;
             break;
@@ -856,6 +857,7 @@ size_t dvmHeapSourceGetValue(HeapSourceValueSpec spec, size_t perHeapStats[],
         case HS_LIMIT:
             value = (size_t) (heap->limit - 0);
             break;
+        // snappy mod end
         default:
             // quiet gcc
             break;
@@ -1020,6 +1022,7 @@ void* dvmHeapSourceAlloc(size_t n)
          */
         return ptr;
     }
+    // Snappy modification
     if ((policyNumber == 1) && (heap->bytesAllocated > heap->concurrentStartBytes)) {
         /*
          * We have exceeded the allocation threshold.  Wake up the

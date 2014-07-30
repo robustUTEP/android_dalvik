@@ -88,9 +88,9 @@ static const GcSpec kGcExplicitFullSpec = {
     true,  /* doPreserve */
     "GC_EXPLICIT_FULL"
 };
-//# Begin Snappy end
 
 const GcSpec *GC_EXPLICIT_FULL = &kGcExplicitFullSpec;
+//# Begin Snappy end
 
 static const GcSpec kGcBeforeOomSpec = {
     false,  /* isPartial */
@@ -330,7 +330,7 @@ static void *tryMalloc(size_t size)
 		#ifdef snappyDebugging
 		ALOGD("Robust log spleen value malloc fail %p", spleen);
 		#endif
-		if ((policyNumber == 15) && (spleen != NULL)) {
+		if ((policyNumber >= 15) && (spleen != NULL)) {
 		    #ifdef snappyDebugging
 		    ALOGD("robust Log Releasing spleen on exhaustion");
 		    #endif
@@ -538,6 +538,10 @@ static void *tryMalloc(size_t size)
     }
     logPrint(LOG_TRY_MALLOC, false, size, 0);
     savePtr(ptr, size);
+    //# Snappy mod start
+    logPrint(LOG_TRY_MALLOC, false, size, 0);
+    savePtr(ptr, size);
+    //# Snappy mod end
     return NULL;
 }
 
@@ -753,7 +757,8 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     #ifdef snappyDebugging
     ALOGD("Robust log spleen value begin GC %p", spleen);
     #endif
-    if ((policyNumber == 15) && (spleen != NULL)) {
+    logPrint(LOG_GC, spec);
+    if ((policyNumber >= 15) && (spleen != NULL)) {
         // free the spleen
         char custMsg[256];
         sprintf(custMsg,",\"size\":%zu"
@@ -765,8 +770,22 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
         dvmFreeSpleen(spleen);
         spleen = NULL;
 	        
-    } 
-    logPrint(LOG_GC, spec);
+    }
+    
+    // experimental setup perf counters
+    // setup is done here because only 
+    // the calling thread will have perf counters
+    if (!countersReady() && !inZygote)
+        setupCounters();
+    // reset counters and enable
+    #ifdef snappyDebugging
+    ALOGD("Robust Log reseting perfcounters");
+    #endif
+    resetCounters();
+    #ifdef snappyDebugging
+    ALOGD("Robust Log enabling perfcounters");
+    #endif
+    enableCounters();
     //# Snappy mod end
 
 
@@ -1043,6 +1062,11 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     ATRACE_END(); // Top-level GC
     
     //# Snappy mod start
+    // experimental disable event counters
+    #ifdef snappyDebugging
+    ALOGD("Robust Log disabling pefcounters");
+    #endif
+    disableCounters();
     // update last GC Time
     lastGCTime = dvmGetRTCTimeMsec();
 	lastGCCPUTime = dvmGetTotalThreadCpuTimeMsec();
@@ -1068,7 +1092,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 	#ifdef snappyDebugging
 	ALOGD("Robust log spleen value end GC %p", spleen);
 	#endif
-	if (policyNumber == 15) {
+	if (policyNumber >= 15) {
 	    // if no spleen alloc a spleen growing if necessary
 	    if ((spleen == NULL) && (spleenSize > 1024)) {
 	        currSpleenSize = spleenSize;

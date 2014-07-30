@@ -32,9 +32,11 @@ enum HeapSourceValueSpec {
     HS_ALLOWED_FOOTPRINT,
     HS_BYTES_ALLOCATED,
     HS_OBJECTS_ALLOCATED,
+    // snappy mod start
     HS_VM_SIZE,
   	HS_LIMIT,
   	HS_BASE
+  	// snappy mod end
 };
 
 /*

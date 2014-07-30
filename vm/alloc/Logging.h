@@ -10,8 +10,11 @@
 #include <string>
 #include <time.h>
 #include <sys/time.h>
+// experimental
+#include "alloc/PerfCounts.h"
 
-#define NUM_POLICIES 15
+
+#define NUM_POLICIES 17
 #define LOG_CUSTOM 0
 #define LOG_TRY_MALLOC 1
 #define LOG_GC 2
@@ -62,6 +65,7 @@ extern size_t maxAdd;
 extern size_t minAdd;
 extern bool firstExhaustSinceGC;
 extern bool dumpHeap;
+extern bool inZygote;
 
 extern size_t lastRequestedSize;
 extern string processName;
