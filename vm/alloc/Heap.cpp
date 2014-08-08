@@ -335,6 +335,7 @@ static void *tryMalloc(size_t size)
 		    ALOGD("robust Log Releasing spleen on exhaustion");
 		    #endif
 		    dvmFreeSpleen(spleen);
+		    spleenGC = false;
 		    spleen = NULL;
 		    schedGC = true;
 		    
@@ -769,6 +770,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
         #endif
         dvmFreeSpleen(spleen);
         spleen = NULL;
+        spleenGC = true;
 	        
     }
     
@@ -1103,9 +1105,12 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 	        #ifdef snappyDebugging
 	        ALOGD("Robust Log Alloc Spleen size %d",currSpleenSize);
 	        #endif
-	        //spleenAlloc = true;
 	        spleen = dvmHeapSourceAllocAndGrow(spleenSize);
-            //spleenAlloc = false;
+	        if (spleen) {
+	            spleenGC = true;
+	            savePtr(spleen, spleenSize);
+	            oldSpleenSize = spleenSize;
+	        }
 	    }
     }
 

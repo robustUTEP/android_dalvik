@@ -510,7 +510,7 @@ void logGC(const GcSpec* spec)
             #endif
             readCounters(results);
             sprintf(custMsg, ",\"CPUType\":\""ARCH"\",\"cycles\":%llu,\"instructions\":%llu,\"tlb-stalls\":%llu,\"instr-stalls\":%llu,"
-                            "\"data-stalls\":%llu,\"issue-empty\":%llu,\"no-dispatch\":%llu,\"page-faults\":%llu,"
+                            "\"data-stalls\":%llu,\"issue-empty\":%llu,\"no-dispatch\":%llu,\"page-faults\":%llu"
                 ,results[0]
                 ,results[1]
                 ,results[2]
@@ -667,6 +667,8 @@ void buildHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, c
 	dvmHeapSourceGetValue(HS_BASE, heapsBase, 2);
 	baseAddr = heapsBase[0];
 
+    if (spleenGC)
+        heapsAlloc[0] -= oldSpleenSize;
     heapsAlloc[0] = heapsAlloc[0] / 1024;
     heapsFootprint[0] = heapsFootprint[0] / 1024;
     heapsMax[0] = heapsMax[0] / 1024;
@@ -1328,6 +1330,7 @@ void setPolicy(int policyNumb)
     spleen = NULL;
     spleenSize = 0;
     totalAlloced = 0;
+    spleenGC = false;
     
 	policy = policies[policyNumb - 1];
 
@@ -1708,6 +1711,7 @@ bool logReady;
 bool schedGC; // Sched GC
 bool resizeOnGC;
 bool firstExhaustSinceGC;
+bool spleenGC;
 FILE* fileLog;
 //string policyName;
 int policyNumber;
@@ -1734,6 +1738,7 @@ bool inZygote = true;
 int lastGCSeqNumber;
 void* spleen;
 size_t spleenSize;
+size_t oldSpleenSize;
 size_t currSpleenSize;
 size_t totalAlloced;
 

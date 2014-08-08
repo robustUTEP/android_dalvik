@@ -66,6 +66,7 @@ extern size_t minAdd;
 extern bool firstExhaustSinceGC;
 extern bool dumpHeap;
 extern bool inZygote;
+extern bool spleenGC;
 
 extern size_t lastRequestedSize;
 extern string processName;
@@ -86,6 +87,7 @@ extern int lastState;
 extern void* spleen;
 extern size_t spleenSize;
 extern size_t currSpleenSize;
+extern size_t oldSpleenSize;
 extern size_t totalAlloced;
 extern size_t hares[4];
 
