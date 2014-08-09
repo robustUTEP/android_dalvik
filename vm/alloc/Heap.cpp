@@ -1107,7 +1107,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 	        #endif
 	        spleen = dvmHeapSourceAllocAndGrow(spleenSize);
 	        if (spleen) {
-	            spleenGC = true;
+	            spleenGC = false;
 	            savePtr(spleen, spleenSize);
 	            oldSpleenSize = spleenSize;
 	        }
