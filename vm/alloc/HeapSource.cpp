@@ -1023,7 +1023,7 @@ void* dvmHeapSourceAlloc(size_t n)
         return ptr;
     }
     // Snappy modification
-    if ((policyNumber == 1) && (heap->bytesAllocated > heap->concurrentStartBytes)) {
+    if ((policyType & BASELINE) && (heap->bytesAllocated > heap->concurrentStartBytes)) {
         /*
          * We have exceeded the allocation threshold.  Wake up the
          * garbage collector.
@@ -1697,6 +1697,14 @@ void dvmHeapSourceRegisterNativeFree(int bytes)
  */
 void dvmInitConcGC(void)
 {
+    if (gDvm.gcHeap->gcRunning) {
+        /*
+         * The GC is concurrently tracing the heap.  Release the heap
+         * lock, wait for the GC to complete, and return.
+         */
+        dvmWaitForConcurrentGcToComplete();
+        return;
+    }
     dvmSignalCond(&gHs->gcThreadCond);
     return;
 }

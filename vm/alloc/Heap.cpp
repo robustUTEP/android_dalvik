@@ -255,7 +255,7 @@ static void *tryMalloc(size_t size)
 //      (number of allocations ago) (watch for thread effects)
 //    DeflateTest allocs a bunch of ~128k buffers w/in 0-5 allocs of each other
 //      (or, at least, there are only 0-5 objects swept each time)
-
+    
     ptr = dvmHeapSourceAlloc(size);
     if (ptr != NULL) {
         //# Snappy mod start
@@ -273,7 +273,7 @@ static void *tryMalloc(size_t size)
      // if we're running MI policy then
      // check if heap should grow instead
      // of running gcs
-     if ((policyNumber != 1) && (policyNumber < 12)) {
+     if (!(policyType & (BASELINE + THROTTLE_THRESHOLD + MAX_GROW_STW + MAX_GROW_BG)) || MIS) {
          
 		#ifdef snappyDebugging
 		ALOGD("Robust Policy Check Malloc Fail, polcy < 12 != 1");
@@ -296,7 +296,7 @@ static void *tryMalloc(size_t size)
 		// return, otherwise run a GC
 		u8 elapsedSinceGC = dvmGetRTCTimeMsec() - lastGCTime;
 		u8 elapsedCPUSinceGC = dvmGetTotalProcessCpuTimeMsec() - lastGCCPUTime;
-		if ((policyNumber < 10) && (elapsedSinceGC < minGCTime) && (ptr != NULL)) {
+		if (!(policyType & MIN_CPU_INTERVAL) && (elapsedSinceGC < minGCTime) && (ptr != NULL)) {
 			logPrint(LOG_TRY_MALLOC, true, size, 0);
 			//ALOGD("Robust Policy Check Malloc Fail Below Threshold Time");
 			savePtr(ptr, size);
@@ -310,7 +310,7 @@ static void *tryMalloc(size_t size)
 
          
         //ALOGD("Robust Policy Check Malloc Fail GC");        
-     } else if (policyNumber >= 12) {
+     } else if (policyType & THROTTLE_THRESHOLD) {
 
 		#ifdef snappyDebugging
 		ALOGD("Robust Policy Check Malloc Fail, policy >= 12");
@@ -330,7 +330,7 @@ static void *tryMalloc(size_t size)
 		#ifdef snappyDebugging
 		ALOGD("Robust log spleen value malloc fail %p", spleen);
 		#endif
-		if ((policyNumber >= 15) && (spleen != NULL)) {
+		if ((spleenPolicy) && (spleen != NULL)) {
 		    #ifdef snappyDebugging
 		    ALOGD("robust Log Releasing spleen on exhaustion");
 		    #endif
@@ -421,6 +421,37 @@ static void *tryMalloc(size_t size)
 			}
 		}		
 
+	} else if ((policyType & MAX_GROW_STW) || (policyType & MAX_GROW_BG)) {
+	    // max grow policies
+	    size_t allocated[2];
+	    dvmHeapSourceGetValue(HS_BYTES_ALLOCATED,allocated,2);
+	    // if we've grown past our max limit run STW or BG GC as needed
+	    if (allocated[0] > maxGrowSize) {
+	        if (policyType & MAX_GROW_STW) {
+	            gcForMalloc(false);
+	            ptr = dvmHeapSourceAlloc(size);
+	        } else {
+	            // for the max grow BG policy
+	            // if BG GC isn't running then start it
+	            if (!gDvm.gcHeap->gcRunning)
+	                dvmInitConcGC();
+	            // grown the heap and move on
+	            ptr = dvmHeapSourceAlloc(size);
+	        }
+	        
+	    } else {
+	        // otherwise grow heap
+	        ptr = dvmHeapSourceAllocAndGrow(size);
+	        // to avoid thrashing grow heap
+	        dvmHeapSourceGrowForUtilization();
+	    }
+	    
+		if (ptr != NULL) {
+		    logPrint(LOG_TRY_MALLOC, true, size, GROW_AND_GO);
+			savePtr(ptr, size);
+			return ptr;
+		}
+	            
 	}
 	//# Snappy mod end
     
@@ -748,8 +779,8 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     // MI2A will allow them to go through
     // MI2S also ignores
     // MI2AE uses it to schedule GC
-    if (((policyNumber == 3) || (policyNumber >= 5)) && (spec == GC_EXPLICIT)) {
-        if (policyNumber == 5) {
+    if ((policyType & IGNORE_EXPLICIT) && (spec == GC_EXPLICIT)) {
+        if (policyType & EXPLICIT_HINT) {
             schedGC = true;
         }
         logPrint(LOG_IGNORE_EXPLICIT);
@@ -759,7 +790,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     ALOGD("Robust log spleen value begin GC %p", spleen);
     #endif
     logPrint(LOG_GC, spec);
-    if ((policyNumber >= 15) && (spleen != NULL)) {
+    if (spleenPolicy  && (spleen != NULL)) {
         // free the spleen
         char custMsg[256];
         sprintf(custMsg,",\"size\":%zu"
@@ -1094,7 +1125,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 	#ifdef snappyDebugging
 	ALOGD("Robust log spleen value end GC %p", spleen);
 	#endif
-	if (policyNumber >= 15) {
+	if (spleenPolicy) {
 	    // if no spleen alloc a spleen growing if necessary
 	    if ((spleen == NULL) && (spleenSize > 1024)) {
 	        currSpleenSize = spleenSize;
@@ -1118,7 +1149,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     logPrint(LOG_GC, spec, numBytesFreed, numObjectsFreed);
 
 	// if we're concurrent increase the number of iterations
-	if ((policyNumber >= 12) && (spec == GC_CONCURRENT)) {
+	if ((policyType & THROTTLE_THRESHOLD) && (spec == GC_CONCURRENT)) {
 		currIterations++;
 	}
 
@@ -1140,7 +1171,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 	// if we've run a minimum number 
 	// of iterations of partial GCs run a 
 	// full GC
-	if ((policyNumber >= 12) && (spec == GC_CONCURRENT) && (currIterations > numIterations)) {
+	if ((policyType & THROTTLE_THRESHOLD) && (spec == GC_CONCURRENT) && (currIterations > numIterations)) {
 		currIterations = 0;
 		dvmCollectGarbageInternal(GC_EXPLICIT_FULL);
 	}

@@ -81,12 +81,20 @@ struct GcPolSpec {
         const char *name;
         /* Policy Number */
         int policyNumber;
+        /* Policy Type */
+        int type;
+        /* If STW (foreground only policy) */
+        bool MIS;
         /* Minimum GC time in ms*/
         unsigned int minTime;
         /* number of 100ms increments keep size log */
         unsigned int intervals;
+        /* if policy actively schedules GC */
+        bool schedulesGC;
 		/* is this an adaptive policy */
 		unsigned int adaptive;
+		/* is this a spleen policy */
+		bool spleen;
 		/* resize threshold on GC */
 		unsigned int resizeThreshold;
 		/* disable heap resize on GC */
@@ -108,9 +116,13 @@ struct GcPolSpec {
 static GcPolSpec stockPol = {
 	"baseline",
 	1,		// Policy Number
+	BASELINE,       // Policy Type
+	false,  // MIS policy
 	0,		// minGCTime
 	0,		// 100ms intervals for histogram
+	false,  // if we actively schedule GC
 	0,		// adaptive
+	false,  // spleen policy
 	0,		// resize threshold on GC
 	true,	// resize heap on gc
 	0,		// time to add
@@ -125,9 +137,13 @@ GcPolSpec *stock = &stockPol;
 static GcPolSpec GcPolMI2 = {
 	"MI2",
 	2,		// Policy Number
+	MIN_INTERVAL,       // Policy Type
+	false,  // MIS policy
 	2000,	// minGCTime
 	0,		// 100ms intervals for histogram
+	false,  // if we actively schedule GC
 	0,		// adaptive
+	false,  // spleen policy
 	0,		// resize threshold on GC
 	true,	// resize heap on gc
 	0,		// time to add
@@ -142,9 +158,13 @@ GcPolSpec *MI2 = &GcPolMI2;
 static GcPolSpec GcPolMI2S = {
 	"MI2S",
 	3,		// Policy Number
+	STW + IGNORE_EXPLICIT,        // Policy Type
+	true,  // MIS policy
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	false,  // if we actively schedule GC
 	0,		// adaptive
+	false,  // spleen policy
 	0,		// resize threshold on GC
 	true,	// resize heap on gc
 	0,		// time to add
@@ -160,9 +180,13 @@ GcPolSpec *MI2S = &GcPolMI2S;
 static GcPolSpec GcPolMI2A = {
 	"MI2A",
 	4,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE,     // Policy Type
+	false,  // MIS policy
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	false,  // spleen policy
 	0,		// resize threshold on GC
 	true,	// resize heap on gc
 	0,		// time to add
@@ -178,9 +202,13 @@ GcPolSpec *MI2A = &GcPolMI2A;
 static GcPolSpec GcPolMI2AE = {
 	"MI2AE",
 	5,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT + EXPLICIT_HINT,   // Policy Type
+	false,  // MIS policy
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	false,  // spleen policy
 	0,		// resize threshold on GC
 	true,	// resize heap on gc
 	0,		// time to add
@@ -196,9 +224,13 @@ GcPolSpec *MI2AE = &GcPolMI2AE;
 static GcPolSpec GcPolMI2AI = {
 	"MI2AI",
 	6,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT,   // Policy Type
+	false,  // MIS policy
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,   // if we actively schedule GC
 	1,		// adaptive
+	false,  // spleen policy
 	0,		// resize threshold on GC
 	true,	// resize heap on gc
 	0,		// time to add
@@ -214,9 +246,13 @@ GcPolSpec *MI2AI = &GcPolMI2AI;
 static GcPolSpec GcPolMI1AI = {
 	"MI1AI",
 	7,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT,   // Policy Type
+	false,  // MIS policy
 	1000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	false,  // spleen policy
 	0,		// resize threshold on GC
 	true,	// resize heap on gc
 	0,		// time to add
@@ -232,9 +268,13 @@ GcPolSpec *MI1AI = &GcPolMI1AI;
 static GcPolSpec GcPolMI2AD = {
 	"MI2AD",
 	8,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT,   // Policy Type
+	false,  // MIS policy
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	false,  // spleen policy
 	1,		// resize threshold on GC
 	true,	// resize heap on gc
 	0,		// time to add
@@ -250,9 +290,13 @@ GcPolSpec *MI2AD = &GcPolMI2AD;
 static GcPolSpec GcPolMI1D = {
 	"MI1D",
 	9,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT,   // Policy Type
+	false,  // MIS policy
 	1000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	false,  // spleen policy
 	1,		// resize threshold on GC
 	true,	// resize heap on gc
 	0,		// time to add
@@ -268,9 +312,13 @@ GcPolSpec *MI1D = &GcPolMI1D;
 static GcPolSpec GcPolMMI2AD = {
 	"MMI2AD",
 	10,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT + MIN_CPU_INTERVAL,   // Policy Type
+	false,  // MIS policy
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	false,  // spleen policy
 	1,		// resize threshold on GC
 	true,	// resize heap on gc
 	0,		// time to add
@@ -284,9 +332,13 @@ static GcPolSpec GcPolMMI2AD = {
 static GcPolSpec GcPolMMI1D = {
 	"MMI1D",
 	11,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT + MIN_CPU_INTERVAL,   // Policy Type
+	false,  // MIS policy
 	1000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	false,  // spleen policy
 	0,		// resize threshold on GC
 	true,	// resize heap on gc
 	0,		// time to add
@@ -302,9 +354,13 @@ GcPolSpec *MMI1D = &GcPolMMI1D;
 static GcPolSpec GcPolRT1 = {
 	"RT1",
 	12,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT + MIN_CPU_INTERVAL + THROTTLE_THRESHOLD,   // Policy Type
+	false,  // MIS policy
 	1000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	false,  // spleen policy
 	0,		// resize threshold on GC
 	false,	// resize heap on gc
 	10,		// time to add
@@ -319,9 +375,13 @@ GcPolSpec *RT1 = &GcPolRT1;
 static GcPolSpec GcPolRT2 = {
 	"RT2",
 	13,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT + MIN_CPU_INTERVAL + THROTTLE_THRESHOLD,   // Policy Type
+	false,  // MIS policy
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	false,  // spleen policy
 	0,		// resize threshold on GC
 	false,	// resize heap on gc
 	10,		// time to add
@@ -337,9 +397,13 @@ GcPolSpec *RT2 = &GcPolRT2;
 static GcPolSpec GcPolRT4 = {
 	"RT4",
 	14,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT + MIN_CPU_INTERVAL + THROTTLE_THRESHOLD,   // Policy Type
+	false,  // MIS policy
 	4000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	false,  // spleen policy
 	0,		// resize threshold on GC
 	false,	// resize heap on gc
 	10,		// time to add
@@ -355,9 +419,13 @@ GcPolSpec *RT4 = &GcPolRT4;
 static GcPolSpec GcPolSpleen4 = {
 	"HareySpleen4",
 	15,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT + MIN_CPU_INTERVAL + THROTTLE_THRESHOLD + SPLEEN,   // Policy Type
+	false,  // MIS policy
 	4000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	true,  // spleen policy
 	0,		// resize threshold on GC
 	false,	// resize heap on gc
 	10,		// time to add
@@ -373,9 +441,13 @@ GcPolSpec *Spleen4 = &GcPolSpleen4;
 static GcPolSpec GcPolSpleen1 = {
 	"HareySpleen1",
 	16,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT + MIN_CPU_INTERVAL + THROTTLE_THRESHOLD + SPLEEN,   // Policy Type
+	false,  // MIS policy
 	1000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	true,  // spleen policy
 	0,		// resize threshold on GC
 	false,	// resize heap on gc
 	10,		// time to add
@@ -391,11 +463,15 @@ GcPolSpec *Spleen1 = &GcPolSpleen1;
 static GcPolSpec GcPolSpleen2 = {
 	"HareySpleen2",
 	17,		// Policy Number
+	MIN_INTERVAL + ADAPTIVE + IGNORE_EXPLICIT + MIN_CPU_INTERVAL + THROTTLE_THRESHOLD + SPLEEN,   // Policy Type
+	false,  // MIS policy
 	2000,	// minGCTime
 	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
 	1,		// adaptive
+	true,  // spleen policy
 	0,		// resize threshold on GC
-	false,	// resize heap on gc
+	false,	// resize heap on gc    
 	10,		// time to add
 	15,		// time to wait
 	50,		// number of iterations to wait	
@@ -405,6 +481,94 @@ static GcPolSpec GcPolSpleen2 = {
 };
 
 GcPolSpec *Spleen2 = &GcPolSpleen2;
+
+static GcPolSpec GcPolMI1S = {
+	"MI1S",
+	18,		// Policy Number
+	STW + IGNORE_EXPLICIT,      // Policy Type
+	true,  // MIS policy
+	1000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	false,  // if we actively schedule GC
+	0,		// adaptive
+	false,  // spleen policy
+	0,		// resize threshold on GC
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
+};
+
+GcPolSpec *MI1S = &GcPolMI1S;
+
+static GcPolSpec GcPolMI4S = {
+	"MI4S",
+	19,		// Policy Number
+	STW + IGNORE_EXPLICIT,      // Policy Type
+	true,  // MIS policy
+	4000,	// minGCTime
+	5,		// 100ms intervals for histogram
+	false,  // if we actively schedule GC
+	0,		// adaptive
+	false,  // spleen policy
+	0,		// resize threshold on GC
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
+};
+
+GcPolSpec *MI4S = &GcPolMI4S;
+
+static GcPolSpec GcPolMAXS = {
+	"MAXS",
+	20,		// Policy Number
+	MAX_GROW_STW + IGNORE_EXPLICIT ,      // Policy Type this grows heap to max so rest doesn't matter
+	false,  // MIS policy
+	0,  	// minGCTime
+	5,		// 100ms intervals for histogram
+	false,  // if we actively schedule GC
+	0,		// adaptive
+	false,  // spleen policy
+	0,		// resize threshold on GC
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
+};
+
+GcPolSpec *MAXS = &GcPolMAXS;
+
+static GcPolSpec GcPolMAXG = {
+	"MAXG",
+	21,		// Policy Number
+	MAX_GROW_BG + IGNORE_EXPLICIT,      // Policy Type this grows heap to max so rest doesn't matter
+	false,  // MIS policy
+	0,	// minGCTime
+	5,		// 100ms intervals for histogram
+	false,  // if we actively schedule GC
+	0,		// adaptive
+	false,  // spleen policy
+	0,		// resize threshold on GC
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1		// beta
+};
+
+GcPolSpec *MAXG = &GcPolMAXG;
 
 const GcPolSpec policies[NUM_POLICIES] = {stockPol, 
 										  GcPolMI2, 
@@ -422,7 +586,11 @@ const GcPolSpec policies[NUM_POLICIES] = {stockPol,
 										  GcPolRT4,
 										  GcPolSpleen4,
 										  GcPolSpleen1,
-										  GcPolSpleen2,};
+										  GcPolSpleen2, 
+										  GcPolMI1S, 
+										  GcPolMI4S,
+										  GcPolMAXS,
+										  GcPolMAXG};
 GcPolSpec policy;
 
 /*
@@ -520,6 +688,7 @@ void logGC(const GcSpec* spec)
                 ,results[6]
                 ,results[7]);
             logPrint(LOG_CUSTOM,"perfCountGC", (char*)custMsg);
+            free(results);
     }
 
     writeLogEvent(LOG_GC, beginOrEnd.c_str(), "GC", thisGCSeqNumb, spec);
@@ -806,12 +975,12 @@ void scheduleConcurrentGC()
     ALOGD("Robust Schedule Concurrent");
     #endif
     // only adaptive policies schedule concurrent GC
-    if (policyNumber >= 4) {
+    if (scheduleConcGC) {
         u8 timeSinceLastGC = dvmGetRTCTimeMsec() - lastGCTime;
 		u8 timeSinceLastGCCPU = dvmGetTotalProcessCpuTimeMsec() - lastGCCPUTime;
 
         // check and see if we're at the min time from a concurrent GC
-        if (((timeSinceLastGC > minGCTime) && policyNumber < 9) || ((timeSinceLastGC > minGCTime) || (timeSinceLastGCCPU > (minGCTime / 2)))) {
+        if (((timeSinceLastGC > minGCTime) && !(policyType & MIN_CPU_INTERVAL)) || ((timeSinceLastGC > minGCTime) || (timeSinceLastGCCPU > (minGCTime / 2)))) {
 
             #ifdef snappyDebugging
             ALOGD("Robust Schedule Concurrent Min Time Complete");
@@ -956,7 +1125,7 @@ u8 getGCTimeAverage(int numIterations)
 void adjustThreshold()
 {
 	// make sure vars have been set up first
-	if (!logReady || policyNumber < 12)
+	if (!logReady || !(policyType & THROTTLE_THRESHOLD))
 		return;
 	// get freespace 500ms ago
 	size_t free500msAgo = freeHistory[(currInterval + (intervals + 1)) % intervals];
@@ -1256,7 +1425,7 @@ void _initLogFile()
 
         fprintf(fileLog, "\n\n%s@header{\"deviceName\":\"%s\",\"deviceID\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu,\"Build_ID\":\""BUILD_ID"\"}\n",
             logPrefix, deviceName, uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
-		if (policyNumber > 12)
+		if (policyType & THROTTLE_THRESHOLD)
 			readThreshold();
 		ALOGD("Robust log reading threshold %d",threshold);
         logReady = true;
@@ -1331,13 +1500,19 @@ void setPolicy(int policyNumb)
     spleenSize = 0;
     totalAlloced = 0;
     spleenGC = false;
-    
+    // set max grow size to 7/8s max heap size
+    maxGrowSize = dvmHeapSourceGetMaximumSize() * (7.0 / 8.0);
+    ALOGD("Robust Log max grow size = %u",maxGrowSize);
 	policy = policies[policyNumb - 1];
 
 	policyNumber = policy.policyNumber;
+	policyType = policy.type;
+	MIS = policy.MIS;
     minGCTime = policy.minTime;
     intervals = policy.intervals;
 	adaptive = policy.adaptive;
+	scheduleConcGC = policy.schedulesGC;
+	spleenPolicy = policy.spleen;
 	resizeThreshold = policy.resizeThreshold;
 	resizeOnGC = policy.resizeOnGC;	
 	timeToAdd = policy.timeToAdd;
@@ -1707,11 +1882,15 @@ int testTime(void)
 int skipLogging = 0;
 size_t thresholdOnGC = 0;
 int seqNumber;
+int policyType;
 bool logReady;
 bool schedGC; // Sched GC
 bool resizeOnGC;
 bool firstExhaustSinceGC;
 bool spleenGC;
+bool MIS;
+bool spleenPolicy;
+bool scheduleConcGC;
 FILE* fileLog;
 //string policyName;
 int policyNumber;
@@ -1733,6 +1912,7 @@ size_t objsFreed;
 size_t lastAllocSize;
 size_t minAdd;
 size_t maxAdd;
+size_t maxGrowSize;
 bool dumpHeap = false;
 bool inZygote = true;
 int lastGCSeqNumber;

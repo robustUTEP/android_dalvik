@@ -14,7 +14,7 @@
 #include "alloc/PerfCounts.h"
 
 
-#define NUM_POLICIES 17
+#define NUM_POLICIES 21
 #define LOG_CUSTOM 0
 #define LOG_TRY_MALLOC 1
 #define LOG_GC 2
@@ -23,6 +23,20 @@
 #define LOG_IGNORE_EXPLICIT 5
 #define MAX_STRING_LENGTH 768
 
+// policy types
+#define BASELINE            (1 << 0)
+#define STW                 (1 << 1) 
+#define MIN_INTERVAL        (1 << 2) 
+#define ADAPTIVE            (1 << 3) 
+#define IGNORE_EXPLICIT     (1 << 4) 
+#define EXPLICIT_HINT       (1 << 5) 
+#define THROTTLE_THRESHOLD  (1 << 6) 
+#define SPLEEN              (1 << 7)  
+#define MIN_CPU_INTERVAL    (1 << 8)
+#define MAX_GROW_STW        (1 << 9)
+#define MAX_GROW_BG         (1 << 10)
+
+// malloc types
 #define DID_NOTHING 0
 #define SCHED_GC 1
 #define PRED_LONG 2
@@ -40,6 +54,10 @@ extern bool logReady;
 extern FILE* fileLog;
 extern string policyName;
 extern int policyNumber;
+extern int policyType;
+extern bool MIS;
+extern bool spleenPolicy;
+extern bool scheduleConcGC;
 extern unsigned int minGCTime;
 extern unsigned int intervals;
 extern unsigned int adaptive;
@@ -83,6 +101,7 @@ static int preinit = 0; // if we're an initialization process (ie zygote or sys 
 extern size_t numBytesFreedLog;
 extern size_t objsFreed;
 extern size_t lastAllocSize;
+extern size_t maxGrowSize; // max size for growth policies
 extern int lastState;
 extern void* spleen;
 extern size_t spleenSize;
