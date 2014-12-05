@@ -288,6 +288,11 @@ void savePtr(void *ptr, size_t size);
 void writeThreshold(void);
 void readThreshold(void);
 
+/*
+ * Testing Method for dlmalloc
+ */
+int testMethod(char*);
+
 
 /*
  * Get the per-process CPU time, in nanoseconds

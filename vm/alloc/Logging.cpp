@@ -1879,6 +1879,38 @@ int testTime(void)
     return(0);
 }
 
+FILE* mallocLogFile = NULL;
+char logBuffer[300000];
+//size_t freeChunks [LOGRATE+1];
+//size_t mallocChunks [LOGRATE+1];
+int testMethod(char *logMessage)
+{
+    int mSuccess = -1;
+    const char* processName = get_process_name();
+    char myProcessName[128];
+    strcpy(myProcessName, processName);
+    
+    if (strncmp(myProcessName, "zygote", 6)) {
+        char baseDir[] = "/sdcard/robust/";
+        char mFileName[128];
+        strcpy(mFileName, baseDir);
+        strcat(mFileName, myProcessName);
+        strcat(mFileName, ".dlm");
+        
+        mallocLogFile = fopen(mFileName, "at");
+        if (mallocLogFile) {
+            fprintf(mallocLogFile, "T time=%llu\n%s\n", dvmGetRTCTimeMsec(), logMessage);
+            fflush(mallocLogFile);
+            mSuccess = 1;
+        } else {
+            ALOGD("%s %s\n", mFileName, logMessage);
+            mSuccess = 0;
+        }
+    }
+    
+    return mSuccess;
+}
+
 int skipLogging = 0;
 size_t thresholdOnGC = 0;
 int seqNumber;

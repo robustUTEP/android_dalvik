@@ -6,7 +6,7 @@ extern int skipLogging;
 extern char logBuffer[300000];
 
 size_t mallocChunks [LOGRATE+1];
-//extern size_t freeChunks [LOGRATE+1];
+size_t freeChunks [LOGRATE+1];
 
 unsigned int eSequence = 0;
 unsigned int logSequence = 0;
@@ -2625,7 +2625,7 @@ struct malloc_state {
   size_t     exts;
 
   //robust
-  char       sBinPopulation [(NSMALLBINS+1)*2];
+  char       sBinPopulation [NSMALLBINS];
 //  char       sBinChunkSize [(NSMALLBINS+1)*2];
   char       tBinPopulation [NTREEBINS];
   char       tBinChunkSize [NTREEBINS];
@@ -3668,7 +3668,7 @@ static void internal_malloc_stats(mstate m) {
   else {\
     CORRUPTION_ERROR_ACTION(M);\
   }\
-  M->sBinPopulation[I]++;\
+  M->sBinPopulation[I]--;\
 }
 
 /* Unlink the first chunk from a smallbin */
@@ -3996,7 +3996,7 @@ static void init_bins(mstate m) {
   }
   for (i=0; i < LOGRATE; i++) {
     mallocChunks[i] = 0;
-//    freeChunks[i] = 0;
+    freeChunks[i] = 0;
   }
 //  mallocChunks[LOGRATE-1] = '\0';
 //  m->freeChunks[LOGRATE] = '\0';
@@ -5709,30 +5709,38 @@ void* mspace_malloc(mspace msp, size_t bytes) {
 
   postaction:
     if ((eSequence == LOGRATE) && !skipLogging) {
-      sprintf(logBuffer,"@dlmStats{\"ls\":%i,", logSequence);
+//      sprintf(logBuffer,"@dlmStats{\"ls\":%i\n", logSequence);
       unsigned int i;
-      char tmp[256] = {0};
+      char tmp[128] = {0};
+      sprintf(logBuffer,"FB free=[");
       for (i = 0; i < NSMALLBINS; ++i) {
-        sprintf(tmp,"\"sBinP[%i]\":%i,\"rp[%i]\":%i,", i, ms->sBinPopulation[i], i,
-                ms->requestedPopulation[i]);
+        sprintf(tmp,"%i:%i, ", i+1, ms->sBinPopulation[i]);
         strcat(logBuffer, tmp);
       }
       for (i=0; i < NTREEBINS; ++i) {
-        sprintf(tmp,"\"tBinP[%i][%i]\":%i,\"rp[%i]\":%i,", i, ms->tBinChunkSize[i], ms->tBinPopulation[i],i+NSMALLBINS, ms->requestedPopulation[NSMALLBINS+i]);
+        sprintf(tmp,"%i:%i, ", ms->tBinChunkSize[i], ms->tBinPopulation[i]);
         strcat(logBuffer, tmp);
       }
+      strcat(logBuffer, "]\nRB reqCount=[");
+      for (i=0; i < NSMALLBINS+NTREEBINS; i++) {
+        if (i < NSMALLBINS)
+          sprintf(tmp,"%i:%i, ", i+1, ms->requestedPopulation[i]);
+        else
+          sprintf(tmp,"%i:%i, ", ms->tBinChunkSize[i-NSMALLBINS], ms->requestedPopulation[i]);
+        strcat(logBuffer, tmp);
+      }
+      strcat(logBuffer, "]\n");
       for (i=0; i < LOGRATE; ++i) {
-//        sprintf(tmp,"\"ms[%i]\":%i,\"fs[%i]\":%i", i, mallocChunks[i], i, freeChunks[i]);
-        sprintf(tmp,"\"ms[%i]\":%i,", i, mallocChunks[i]);
+        sprintf(tmp,"M %i, F %i\n", mallocChunks[i], freeChunks[i]);
         strcat(logBuffer, tmp);
       }
-      sprintf(tmp,"\"dv\":%i}\n",ms->dvsize);
+      sprintf(tmp,"DV %i\n",ms->dvsize);
       strcat(logBuffer, tmp);
       testMethod((char*)logBuffer);
       mCount = 0;
       fCount = 0;
       eSequence = 0;
-      logSequence++;
+//      logSequence++;
     }
     POSTACTION(ms);
     return mem;
@@ -5761,7 +5769,6 @@ void mspace_free(mspace msp, void* mem) {
         mchunkptr next = chunk_plus_offset(p, psize);
         
 //        freeChunks[fCount] = psize; //robust
-//        fCount++;
         
         if (!pinuse(p)) {
           size_t prevsize = p->prev_foot;
@@ -5841,6 +5848,7 @@ void mspace_free(mspace msp, void* mem) {
     erroraction:
       USAGE_ERROR_ACTION(fm, p);
     postaction:
+//      fCount++;
       POSTACTION(fm);
     }
   }

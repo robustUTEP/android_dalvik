@@ -27,7 +27,7 @@
 #define MALLOC_INSPECT_ALL 1
 
 /* Include the proper definitions. */
-#include "../../../bionic/libc/upstream-dlmalloc/malloc.h"
+#include "malloc.h"
 
 /*
  * Define dlmalloc routines from bionic that cannot be included
