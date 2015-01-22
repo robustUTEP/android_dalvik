@@ -2,20 +2,19 @@
 #define LOGRATE 5000
 
 extern int testMethod(char*);
-extern int skipLogging;
-extern char logBuffer[300000];
+extern int dlmStats;
+//extern int logRate;
+char logBuffer[3000000];
 
-size_t mallocChunks [LOGRATE+1];
-size_t freeChunks [LOGRATE+1];
+//size_t mallocChunks [LOGRATE+1];
+//void *freeChunks [LOGRATE+1];
+void *freePrevious = 0;
+//void *mallocAddrs [LOGRATE+1];
 
-unsigned int eSequence = 0;
-unsigned int logSequence = 0;
 unsigned int mCount = 0;
-unsigned int fCount = 0;
 
 unsigned int sBinCount = 0;
 unsigned int tBinCount = 0;
-
 
 /*
   This is a version (aka dlmalloc) of malloc/free/realloc written by
@@ -3994,13 +3993,12 @@ static void init_bins(mstate m) {
     m->tBinChunkSize[i] = 0;
     m->requestedPopulation[NSMALLBINS+i] = 0;
   }
-  for (i=0; i < LOGRATE; i++) {
-    mallocChunks[i] = 0;
-    freeChunks[i] = 0;
-  }
-//  mallocChunks[LOGRATE-1] = '\0';
-//  m->freeChunks[LOGRATE] = '\0';
- 
+  sprintf(logBuffer,"Begin of Logging:\n");
+//  for (i=0; i < LOGRATE; i++) {
+//    mallocChunks[i] = 0;
+//    freeChunks[i] = 0;
+//    mallocAddrs[i] = 0;
+//  }
 }
 
 #if PROCEED_ON_ERROR
@@ -5223,9 +5221,37 @@ static size_t internal_bulk_free(mstate m, void* array[], size_t nelem) {
           break;
         }
       }
-    }
+      //robustdl
+      if (dlmStats) {
+        if (mem != freePrevious) {
+          freePrevious = mem;
+          char tmp[128];
+          if (mCount < LOGRATE) {
+            //          freeChunks[mCount] = mem; //robust
+            
+            sprintf(tmp, "F %p\n", mem);
+            strcat(logBuffer, tmp);
+            mCount++;
+          }
+          else if (mCount == LOGRATE) {
+            mCount = 0;
+            //          if (dlmStats) {
+            //            unsigned int i;
+            //            char tmp[256];
+            //            for (i=0; i < LOGRATE; ++i) {
+            sprintf(tmp,"F %p\n", mem);
+            strcat(logBuffer, tmp);
+            //            }
+            testMethod((char*)logBuffer);
+            //          }
+          }
+        }
+      }
+      //endrobustdl
     if (should_trim(m, m->topsize))
       sys_trim(m, 0);
+    }
+    
     POSTACTION(m);
   }
   return unfreed;
@@ -5599,19 +5625,15 @@ void* mspace_malloc(mspace msp, size_t bytes) {
     USAGE_ERROR_ACTION(ms,ms);
     return 0;
   }
+  size_t nb;
   if (!PREACTION(ms)) {
     void* mem;
-    size_t nb;
     if (bytes <= MAX_SMALL_REQUEST) {
       bindex_t idx;
       binmap_t smallbits;
       nb = (bytes < MIN_REQUEST)? MIN_CHUNK_SIZE : pad_request(bytes);
       idx = small_index(nb);
       smallbits = ms->smallmap >> idx;
-      
-      eSequence++;
-      mallocChunks[mCount] = nb; //robust
-      mCount++;
 
       if ((smallbits & 0x3U) != 0) { /* Remainderless fit to a smallbin. */
         mchunkptr b, p;
@@ -5708,39 +5730,51 @@ void* mspace_malloc(mspace msp, size_t bytes) {
     mem = sys_alloc(ms, nb);
 
   postaction:
-    if ((eSequence == LOGRATE) && !skipLogging) {
-//      sprintf(logBuffer,"@dlmStats{\"ls\":%i\n", logSequence);
-      unsigned int i;
-      char tmp[128] = {0};
-      sprintf(logBuffer,"FB free=[");
-      for (i = 0; i < NSMALLBINS; ++i) {
-        sprintf(tmp,"%i:%i, ", i+1, ms->sBinPopulation[i]);
-        strcat(logBuffer, tmp);
-      }
-      for (i=0; i < NTREEBINS; ++i) {
-        sprintf(tmp,"%i:%i, ", ms->tBinChunkSize[i], ms->tBinPopulation[i]);
-        strcat(logBuffer, tmp);
-      }
-      strcat(logBuffer, "]\nRB reqCount=[");
-      for (i=0; i < NSMALLBINS+NTREEBINS; i++) {
-        if (i < NSMALLBINS)
-          sprintf(tmp,"%i:%i, ", i+1, ms->requestedPopulation[i]);
-        else
-          sprintf(tmp,"%i:%i, ", ms->tBinChunkSize[i-NSMALLBINS], ms->requestedPopulation[i]);
-        strcat(logBuffer, tmp);
-      }
-      strcat(logBuffer, "]\n");
-      for (i=0; i < LOGRATE; ++i) {
-        sprintf(tmp,"M %i, F %i\n", mallocChunks[i], freeChunks[i]);
-        strcat(logBuffer, tmp);
-      }
-      sprintf(tmp,"DV %i\n",ms->dvsize);
+    
+    if (dlmStats) {
+      char tmp[128];
+      //      mallocChunks[mCount] = nb; //robust
+      //      mallocAddrs[mCount] = mem;
+      sprintf(tmp, "M %i %p\n",nb, mem);
       strcat(logBuffer, tmp);
-      testMethod((char*)logBuffer);
-      mCount = 0;
-      fCount = 0;
-      eSequence = 0;
-//      logSequence++;
+      mCount++;
+      
+      
+      if ((mCount == LOGRATE)) {
+        mCount = 0;
+        
+        //        unsigned int i;
+//        char tmp[128];
+        //        strcat(logBuffer,"FB free=[");
+        //        for (i = 0; i < NSMALLBINS; ++i) {
+        //          sprintf(tmp,"%i:%i, ", i+1, ms->sBinPopulation[i]);
+        //          strcat(logBuffer, tmp);
+        //        }
+        //        for (i=0; i < NTREEBINS; ++i) {
+        //          sprintf(tmp,"%i:%i, ", ms->tBinChunkSize[i], ms->tBinPopulation[i]);
+        //          strcat(logBuffer, tmp);
+        //        }
+        //        strcat(logBuffer, "]\nRB reqCount=[");
+        //        for (i=0; i < NSMALLBINS+NTREEBINS; i++) {
+        //          if (i < NSMALLBINS)
+        //            sprintf(tmp,"%i:%i, ", i+1, ms->requestedPopulation[i]);
+        //          else
+        //            sprintf(tmp,"%i:%i, ", ms->tBinChunkSize[i-NSMALLBINS], ms->requestedPopulation[i]);
+        //          strcat(logBuffer, tmp);
+        //        }
+        //        strcat(logBuffer, "]\n");
+        //        for (i=0; i < LOGRATE; ++i) {
+        //          sprintf(tmp,"M %i %p\n", mallocChunks[i], mallocAddrs[i]);
+        //          strcat(logBuffer, tmp);
+        //        }
+        
+        sprintf(tmp, "M %i %p\n",nb, mem);
+        strcat(logBuffer, tmp);
+        
+        //        sprintf(tmp,"DV %i\nmCount %i\n",ms->dvsize, mCount);
+        //        strcat(logBuffer, tmp);
+        testMethod((char*)logBuffer);
+      }
     }
     POSTACTION(ms);
     return mem;
@@ -5768,7 +5802,7 @@ void mspace_free(mspace msp, void* mem) {
         size_t psize = chunksize(p);
         mchunkptr next = chunk_plus_offset(p, psize);
         
-//        freeChunks[fCount] = psize; //robust
+//        freeChunks[mCount] = mem; //robust
         
         if (!pinuse(p)) {
           size_t prevsize = p->prev_foot;
@@ -5848,7 +5882,23 @@ void mspace_free(mspace msp, void* mem) {
     erroraction:
       USAGE_ERROR_ACTION(fm, p);
     postaction:
-//      fCount++;
+
+//      freeChunks[mCount] = mem; //robust
+//      mCount++;
+//      
+//      if (mCount == LOGRATE) {
+//        mCount = 0;
+//        if (dlmStats) {
+//          unsigned int i;
+//          char tmp[128] = {0};
+//          for (i=0; i < LOGRATE; ++i) {
+//            sprintf(tmp,"F %p\n", freeChunks[i]);
+//            strcat(logBuffer, tmp);
+//          }
+//          strcat(logBuffer, tmp);
+//          testMethod((char*)logBuffer);
+//        }
+//      }
       POSTACTION(fm);
     }
   }

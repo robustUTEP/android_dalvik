@@ -1181,7 +1181,7 @@ void _initLogFile()
     
     initLogDone = 0;
     skipLogging = 0;
-	dumpHeap = false;
+    dlmStats = 0;
 
     /* Get process name */
     const char* processName = get_process_name();
@@ -1317,7 +1317,7 @@ void _initLogFile()
         // misses the fact that it's above
         polNumb = DEFAULT_POLICY;
         skipLogging = 1;
-
+        dlmStats = 0;
         setPolicy(polNumb);
         logReady = true;
         return; // GC Policy file doesn't exist so we just run defaults anyway
@@ -1350,10 +1350,10 @@ void _initLogFile()
          } else {
 			polNumb = DEFAULT_POLICY;
 		}
-		ALOGD("Robust Log enableDump %s",enableDump);
-		if (!strncmp(enableDump, "true", 4)) {
-			dumpHeap = true;
-			ALOGD("Robust Log Enabling Heap dumps");
+		ALOGD("Robust Log enable dlmStats %s",enableDump);
+        dlmStats = atoi(enableDump);
+		if (dlmStats) {
+			ALOGD("Robust Log Enabling dlmStats");
 		}
     }
         
@@ -1545,15 +1545,6 @@ void savePtr(void *ptr, size_t size)
 		minAdd = tmp;
 	if (tmp + size > maxAdd)
 		maxAdd = tmp + size;
-}
-
-void saveHeap(void) 
-{
-	if (dumpHeap) {
-	    ALOGD("Robust Log Starting dump");
-		dlmalloc_inspect_all(memDumpHandler, NULL);
-	    ALOGD("Robust Log Finishing dump");
-	}
 }
 
 void memDumpHandler(void* start, void* end, size_t used_bytes,
@@ -1880,11 +1871,16 @@ int testTime(void)
 }
 
 FILE* mallocLogFile = NULL;
-char logBuffer[300000];
+//int logRate = 5000;
+//char logBuffer[3000000];
 //size_t freeChunks [LOGRATE+1];
 //size_t mallocChunks [LOGRATE+1];
 int testMethod(char *logMessage)
 {
+    u8 wcTime = dvmGetRTCTimeMsec();
+    u8 appTime = dvmGetTotalProcessCpuTimeMsec();
+//    u8 threadTime = dvmGetTotalThreadCpuTimeMsec();
+    
     int mSuccess = -1;
     const char* processName = get_process_name();
     char myProcessName[128];
@@ -1899,18 +1895,21 @@ int testMethod(char *logMessage)
         
         mallocLogFile = fopen(mFileName, "at");
         if (mallocLogFile) {
-            fprintf(mallocLogFile, "T time=%llu\n%s\n", dvmGetRTCTimeMsec(), logMessage);
+            fprintf(mallocLogFile, "wcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
+                    wcTime, appTime, logMessage);
             fflush(mallocLogFile);
             mSuccess = 1;
         } else {
-            ALOGD("%s %s\n", mFileName, logMessage);
+            ALOGD("%s %s\n", mFileName, "can't open file");
             mSuccess = 0;
         }
+        logMessage[0] = '\0';
     }
     
     return mSuccess;
 }
 
+int dlmStats = 0;
 int skipLogging = 0;
 size_t thresholdOnGC = 0;
 int seqNumber;
@@ -1945,7 +1944,6 @@ size_t lastAllocSize;
 size_t minAdd;
 size_t maxAdd;
 size_t maxGrowSize;
-bool dumpHeap = false;
 bool inZygote = true;
 int lastGCSeqNumber;
 void* spleen;

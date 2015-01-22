@@ -82,7 +82,6 @@ extern size_t thresholdOnGC;
 extern size_t maxAdd;
 extern size_t minAdd;
 extern bool firstExhaustSinceGC;
-extern bool dumpHeap;
 extern bool inZygote;
 extern bool spleenGC;
 
@@ -122,6 +121,7 @@ INLINE u8 dvmGetRTCTimeMsec(void) {
 
 void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec);
 
+extern int dlmStats;
 extern int skipLogging;
 inline void logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
 {
