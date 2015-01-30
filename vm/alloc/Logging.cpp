@@ -1875,6 +1875,7 @@ FILE* mallocLogFile = NULL;
 //char logBuffer[3000000];
 //size_t freeChunks [LOGRATE+1];
 //size_t mallocChunks [LOGRATE+1];
+
 int testMethod(char *logMessage)
 {
     u8 wcTime = dvmGetRTCTimeMsec();
@@ -1895,8 +1896,12 @@ int testMethod(char *logMessage)
         
         mallocLogFile = fopen(mFileName, "at");
         if (mallocLogFile) {
-            fprintf(mallocLogFile, "Begin of Logging:\nwcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
+            if (strncmp(logMessage, "Begin logging", 13)) {
+                fprintf(mallocLogFile, "Begin of Logging:\n");
+            } else {
+                fprintf(mallocLogFile, "wcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
                     wcTime, appTime, logMessage);
+            }
             fflush(mallocLogFile);
             mSuccess = 1;
         } else {
