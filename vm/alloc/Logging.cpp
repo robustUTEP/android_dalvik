@@ -1895,7 +1895,7 @@ int testMethod(char *logMessage)
         
         mallocLogFile = fopen(mFileName, "at");
         if (mallocLogFile) {
-            fprintf(mallocLogFile, "wcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
+            fprintf(mallocLogFile, "Begin of Logging:\nwcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
                     wcTime, appTime, logMessage);
             fflush(mallocLogFile);
             mSuccess = 1;

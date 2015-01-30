@@ -3993,7 +3993,7 @@ static void init_bins(mstate m) {
     m->tBinChunkSize[i] = 0;
     m->requestedPopulation[NSMALLBINS+i] = 0;
   }
-  sprintf(logBuffer,"Begin of Logging:\n");
+  sprintf(logBuffer,"");
 //  for (i=0; i < LOGRATE; i++) {
 //    mallocChunks[i] = 0;
 //    freeChunks[i] = 0;
