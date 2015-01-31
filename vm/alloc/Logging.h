@@ -293,7 +293,6 @@ void readThreshold(void);
  */
 int testMethod(char*);
 
-
 /*
  * Get the per-process CPU time, in nanoseconds
  *

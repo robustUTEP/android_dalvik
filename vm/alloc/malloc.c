@@ -2,9 +2,9 @@
 #define LOGRATE 5000
 
 extern int testMethod(char*);
-extern int dlmStats;
+extern int dlmStats; //Enable dlm stats
 //extern int logRate;
-char logBuffer[3000000];
+char logBuffer[1000000];
 
 //size_t mallocChunks [LOGRATE+1];
 //void *freeChunks [LOGRATE+1];
@@ -3994,13 +3994,6 @@ static void init_bins(mstate m) {
     m->requestedPopulation[NSMALLBINS+i] = 0;
   }
   logBuffer[0] = '\0';
-  char tmp[] = "Begin logging";
-  testMethod((char*)tmp);
-//  for (i=0; i < LOGRATE; i++) {
-//    mallocChunks[i] = 0;
-//    freeChunks[i] = 0;
-//    mallocAddrs[i] = 0;
-//  }
 }
 
 #if PROCEED_ON_ERROR
@@ -5732,52 +5725,53 @@ void* mspace_malloc(mspace msp, size_t bytes) {
     mem = sys_alloc(ms, nb);
 
   postaction:
-    
-    if (dlmStats) {
-      char tmp[128];
-      //      mallocChunks[mCount] = nb; //robust
-      //      mallocAddrs[mCount] = mem;
-      sprintf(tmp, "M %i %p\n",nb, mem);
-      strcat(logBuffer, tmp);
-      mCount++;
-      
-      
-      if ((mCount == LOGRATE)) {
-        mCount = 0;
-        
-        //        unsigned int i;
-//        char tmp[128];
-        //        strcat(logBuffer,"FB free=[");
-        //        for (i = 0; i < NSMALLBINS; ++i) {
-        //          sprintf(tmp,"%i:%i, ", i+1, ms->sBinPopulation[i]);
-        //          strcat(logBuffer, tmp);
-        //        }
-        //        for (i=0; i < NTREEBINS; ++i) {
-        //          sprintf(tmp,"%i:%i, ", ms->tBinChunkSize[i], ms->tBinPopulation[i]);
-        //          strcat(logBuffer, tmp);
-        //        }
-        //        strcat(logBuffer, "]\nRB reqCount=[");
-        //        for (i=0; i < NSMALLBINS+NTREEBINS; i++) {
-        //          if (i < NSMALLBINS)
-        //            sprintf(tmp,"%i:%i, ", i+1, ms->requestedPopulation[i]);
-        //          else
-        //            sprintf(tmp,"%i:%i, ", ms->tBinChunkSize[i-NSMALLBINS], ms->requestedPopulation[i]);
-        //          strcat(logBuffer, tmp);
-        //        }
-        //        strcat(logBuffer, "]\n");
-        //        for (i=0; i < LOGRATE; ++i) {
-        //          sprintf(tmp,"M %i %p\n", mallocChunks[i], mallocAddrs[i]);
-        //          strcat(logBuffer, tmp);
-        //        }
-        
-        sprintf(tmp, "M %i %p\n",nb, mem);
-        strcat(logBuffer, tmp);
-        
-        //        sprintf(tmp,"DV %i\nmCount %i\n",ms->dvsize, mCount);
-        //        strcat(logBuffer, tmp);
-        testMethod((char*)logBuffer);
+      // Begin robustdl
+      if (dlmStats) {
+          char tmp[128];
+          //      mallocChunks[mCount] = nb; //robust
+          //      mallocAddrs[mCount] = mem;
+          sprintf(tmp, "M %i %p\n",nb, mem);
+          strcat(logBuffer, tmp);
+          mCount++;
+          
+          
+          if ((mCount == LOGRATE)) {
+              mCount = 0;
+              
+              //        unsigned int i;
+              //        char tmp[128];
+              //        strcat(logBuffer,"FB free=[");
+              //        for (i = 0; i < NSMALLBINS; ++i) {
+              //          sprintf(tmp,"%i:%i, ", i+1, ms->sBinPopulation[i]);
+              //          strcat(logBuffer, tmp);
+              //        }
+              //        for (i=0; i < NTREEBINS; ++i) {
+              //          sprintf(tmp,"%i:%i, ", ms->tBinChunkSize[i], ms->tBinPopulation[i]);
+              //          strcat(logBuffer, tmp);
+              //        }
+              //        strcat(logBuffer, "]\nRB reqCount=[");
+              //        for (i=0; i < NSMALLBINS+NTREEBINS; i++) {
+              //          if (i < NSMALLBINS)
+              //            sprintf(tmp,"%i:%i, ", i+1, ms->requestedPopulation[i]);
+              //          else
+              //            sprintf(tmp,"%i:%i, ", ms->tBinChunkSize[i-NSMALLBINS], ms->requestedPopulation[i]);
+              //          strcat(logBuffer, tmp);
+              //        }
+              //        strcat(logBuffer, "]\n");
+              //        for (i=0; i < LOGRATE; ++i) {
+              //          sprintf(tmp,"M %i %p\n", mallocChunks[i], mallocAddrs[i]);
+              //          strcat(logBuffer, tmp);
+              //        }
+              
+              sprintf(tmp, "M %i %p\n",nb, mem);
+              strcat(logBuffer, tmp);
+              
+              //        sprintf(tmp,"DV %i\nmCount %i\n",ms->dvsize, mCount);
+              //        strcat(logBuffer, tmp);
+              testMethod((char*)logBuffer);
+          }
       }
-    }
+      // End robustdl
     POSTACTION(ms);
     return mem;
   }

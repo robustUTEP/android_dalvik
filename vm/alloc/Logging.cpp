@@ -1439,6 +1439,7 @@ void _initLogFile()
         fflush(notLogged);
         ALOGD("Robust Log fail open %s %s", fileName,strerror(errno));
         logReady = false;
+		inZygote = false;
 		preDone = 1; // inits should never reach here but just in case
         return;
     }
@@ -1871,47 +1872,48 @@ int testTime(void)
 }
 
 FILE* mallocLogFile = NULL;
-//int logRate = 5000;
-//char logBuffer[3000000];
-//size_t freeChunks [LOGRATE+1];
-//size_t mallocChunks [LOGRATE+1];
-
+bool ifProcessInit = false;
 int testMethod(char *logMessage)
 {
-    u8 wcTime = dvmGetRTCTimeMsec();
-    u8 appTime = dvmGetTotalProcessCpuTimeMsec();
-//    u8 threadTime = dvmGetTotalThreadCpuTimeMsec();
-    
-    int mSuccess = -1;
-    const char* processName = get_process_name();
-    char myProcessName[128];
-    strcpy(myProcessName, processName);
-    
-    if (strncmp(myProcessName, "zygote", 6)) {
-        char baseDir[] = "/sdcard/robust/";
-        char mFileName[128];
-        strcpy(mFileName, baseDir);
-        strcat(mFileName, myProcessName);
-        strcat(mFileName, ".dlm");
-        
-        mallocLogFile = fopen(mFileName, "at");
-        if (mallocLogFile) {
-            if (strncmp(logMessage, "Begin logging", 13)) {
-                fprintf(mallocLogFile, "Begin of Logging:\n");
-            } else {
-                fprintf(mallocLogFile, "wcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
-                    wcTime, appTime, logMessage);
-            }
-            fflush(mallocLogFile);
-            mSuccess = 1;
-        } else {
-            ALOGD("%s %s\n", mFileName, "can't open file");
-            mSuccess = 0;
-        }
-        logMessage[0] = '\0';
-    }
-    
-    return mSuccess;
+	u8 wcTime = dvmGetRTCTimeMsec();
+	u8 appTime = dvmGetTotalProcessCpuTimeMsec();
+	int mSuccess = -1;
+	
+	if (!ifProcessInit) {
+		const char* processName = get_process_name();
+		char myProcessName[128];
+		strcpy(myProcessName, processName);
+		char baseDir[] = "/sdcard/robust/";
+		char mFileName[128];
+		strcpy(mFileName, baseDir);
+		strcat(mFileName, myProcessName);
+		strcat(mFileName, ".dlm");
+		mallocLogFile = fopen(mFileName, "at");
+		ifProcessInit = true;
+		
+		if (mallocLogFile) {
+			fprintf(mallocLogFile, "Begin logging:\nwcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
+					wcTime, appTime, logMessage);
+			fflush(mallocLogFile);
+			mSuccess = 1;
+		} else {
+			ALOGD("dlmstats_init %s can't open file %s\n", myProcessName, strerror(errno));
+			mSuccess = 0;
+		}
+		logMessage[0] = '\0';
+	} else {
+		if (mallocLogFile) {
+			fprintf(mallocLogFile, "wcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
+					wcTime, appTime, logMessage);
+			fflush(mallocLogFile);
+			mSuccess = 1;
+		} else {
+			ALOGD("dlmstats %s can't open file %s\n", get_process_name(), strerror(errno));
+			mSuccess = 0;
+		}
+		logMessage[0] = '\0';
+	}
+	return mSuccess;
 }
 
 int dlmStats = 0;
