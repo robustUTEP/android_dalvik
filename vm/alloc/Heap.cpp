@@ -771,8 +771,6 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     
     //# Snappy mod start    
     size_t currAllocatedS[2], currFootprintS[2];
-    char *tmpBuf;
-	tmpBuf = (char *)malloc(128);
 	
     // check if we're doing MI2A* or MI2E
     // on MI2A* we ignore explicits on MI2AE
@@ -1005,7 +1003,9 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
      */
      
     //# Snappy mod start
-    if (resizeOnGC)
+	// only resize based on policy (or if we're something 
+	// important so we can rapidly grow, slow start fix)
+	if (resizeOnGC || inZygote)
         dvmHeapSourceGrowForUtilization();
     dvmHeapSourceGetValue(HS_BYTES_ALLOCATED, currAllocatedS, 2);
     dvmHeapSourceGetValue(HS_FOOTPRINT, currFootprintS, 2);

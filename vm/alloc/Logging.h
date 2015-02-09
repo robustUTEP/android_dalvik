@@ -14,7 +14,7 @@
 #include "alloc/PerfCounts.h"
 
 
-#define NUM_POLICIES 21
+#define NUM_POLICIES 24
 #define LOG_CUSTOM 0
 #define LOG_TRY_MALLOC 1
 #define LOG_GC 2
@@ -24,17 +24,18 @@
 #define MAX_STRING_LENGTH 768
 
 // policy types
-#define BASELINE            (1 << 0)
-#define STW                 (1 << 1) 
-#define MIN_INTERVAL        (1 << 2) 
-#define ADAPTIVE            (1 << 3) 
-#define IGNORE_EXPLICIT     (1 << 4) 
-#define EXPLICIT_HINT       (1 << 5) 
-#define THROTTLE_THRESHOLD  (1 << 6) 
-#define SPLEEN              (1 << 7)  
-#define MIN_CPU_INTERVAL    (1 << 8)
-#define MAX_GROW_STW        (1 << 9)
-#define MAX_GROW_BG         (1 << 10)
+#define BASELINE            (1 << 0)	// Baseline policy
+#define STW                 (1 << 1) 	// only run foreground gc
+#define MIN_INTERVAL        (1 << 2) 	// force min gc interval
+#define ADAPTIVE            (1 << 3) 	// adaptive gc policy
+#define IGNORE_EXPLICIT     (1 << 4) 	// ignore requests for explicit gc
+#define EXPLICIT_HINT       (1 << 5) 	// use explicits as a hint rather than running gc
+#define THROTTLE_THRESHOLD  (1 << 6) 	// Throttle the gc threshold so we don't wait too long
+#define SPLEEN              (1 << 7)  	// use a spleen
+#define MIN_CPU_INTERVAL    (1 << 8)	// Policy that has a minimum cpu interval
+#define MAX_GROW_STW        (1 << 9)	// max grow stw policy
+#define MAX_GROW_BG         (1 << 10)	// max grow bg policy
+#define FORCE_GC			(1 << 11)	// force GCs periodically regardless of what happens
 
 // malloc types
 #define DID_NOTHING 0
@@ -44,6 +45,10 @@
 #define SUCCESS 4
 #define RELEASE_SPLEEN 5
 #define GROW_AND_GO 6
+
+// message types
+#define PERF_GC         1
+#define PERF_GENERAL    2
 
 #define dvmGetThreadCpuTimeMsec() (dvmGetThreadCpuTimeNsec() / 1000000)
 using namespace std;
@@ -65,6 +70,9 @@ extern unsigned int resizeThreshold;
 extern unsigned short timeToWait;
 extern unsigned short numIterations;
 extern unsigned short currIterations;
+extern int mallocGCRate;
+extern int forceGCThresh;
+extern int forceGCNoThresh;
 extern float partialAlpha;
 extern float fullAlpha;
 extern float beta;
@@ -287,6 +295,13 @@ void savePtr(void *ptr, size_t size);
  */
 void writeThreshold(void);
 void readThreshold(void);
+void writeHeapSize(void);
+void readHeapSize(void);
+
+/*
+ * write the counter values out to the log
+ */
+void logCounters(int msgType);
 
 
 /*

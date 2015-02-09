@@ -227,4 +227,9 @@ void dvmInitConcGC(void);
  */
 void dvmFreeSpleen(void* spleen);
 
+/*
+ * used to grow heap
+ */
+void dvmSetSize(size_t size);
+
 #endif  // DALVIK_HEAP_SOURCE_H_

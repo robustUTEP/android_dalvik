@@ -5,7 +5,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <inttypes.h>
-
+#include <limits.h>
 #include <errno.h>
 
 #include "Dalvik.h"
@@ -22,10 +22,16 @@
 #include "sched.h"
 #include "alloc/DlMalloc.h"
 
-#define BUILD_ID "0725-2130-logOthers-noDalvik-saveStats"
+#define BUILD_ID "1029-2130-logOthers-noDalvik-saveStats"
 #define CONCURRENT_START_DEFAULT (128 << 10)
 #define NUM_GC_AVERAGES 10
 #define DEFAULT_POLICY 13
+#define HEAP_LOG_LENGTH 256
+
+// disables logging of perf counters
+// useful were cpu doesn't report or for performance
+// analysis
+#define SKIP_PERFS
 
 // comment out to remove 
 // logcat debugging s
@@ -52,11 +58,17 @@ u8 lastExhaustion;
 size_t allocHistory[] = {0,0,0};
 size_t hares[] = {0,0,0};
 size_t baseAddr;
+size_t heapSize;
+size_t heapAllocSizes[HEAP_LOG_LENGTH];
+size_t minHeapSize; // minimum heap size seen
+int heapAllocIndex;
 int currAllocHistory = 0;
 int currInterval = 0;
 bool threshSet;
 struct timespec startTime;
 int mallocsDone;
+int numMallocs = 0;
+int numMallocFails;
 char thisProcessName[80];
 char logPrefix[80];	// for the apps that don't have sdcard access
 char deviceName[25];
@@ -111,6 +123,12 @@ struct GcPolSpec {
 		float fullAlpha;
 		/* beta for partial/full GC scalling */
 		float beta;
+		/* how many mallocs till we kick off GC */
+		int mallocGCRate;
+		/*  ms before force gc if malloc threshold reached */
+		int forceGCThresh;
+		/* ms before force gc if malloc threshold not reached */
+		int forceGCNoThresh;
 };
 
 static GcPolSpec stockPol = {
@@ -130,7 +148,10 @@ static GcPolSpec stockPol = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 GcPolSpec *stock = &stockPol;
 
@@ -151,7 +172,10 @@ static GcPolSpec GcPolMI2 = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 GcPolSpec *MI2 = &GcPolMI2;
 
@@ -172,7 +196,10 @@ static GcPolSpec GcPolMI2S = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *MI2S = &GcPolMI2S;
@@ -194,7 +221,10 @@ static GcPolSpec GcPolMI2A = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *MI2A = &GcPolMI2A;
@@ -216,7 +246,10 @@ static GcPolSpec GcPolMI2AE = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *MI2AE = &GcPolMI2AE;
@@ -238,7 +271,10 @@ static GcPolSpec GcPolMI2AI = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *MI2AI = &GcPolMI2AI;
@@ -260,7 +296,10 @@ static GcPolSpec GcPolMI1AI = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *MI1AI = &GcPolMI1AI;
@@ -282,7 +321,10 @@ static GcPolSpec GcPolMI2AD = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *MI2AD = &GcPolMI2AD;
@@ -304,7 +346,10 @@ static GcPolSpec GcPolMI1D = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *MI1D = &GcPolMI1D;
@@ -326,7 +371,10 @@ static GcPolSpec GcPolMMI2AD = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 static GcPolSpec GcPolMMI1D = {
@@ -346,7 +394,10 @@ static GcPolSpec GcPolMMI1D = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *MMI1D = &GcPolMMI1D;
@@ -368,7 +419,10 @@ static GcPolSpec GcPolRT1 = {
 	50,		// number of iterations to wait	
 	.2,		// alpha for partial gc average
 	.5,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 GcPolSpec *RT1 = &GcPolRT1;
 
@@ -389,7 +443,10 @@ static GcPolSpec GcPolRT2 = {
 	50,		// number of iterations to wait	
 	.2,		// alpha for partial gc average
 	.5,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *RT2 = &GcPolRT2;
@@ -411,7 +468,10 @@ static GcPolSpec GcPolRT4 = {
 	50,		// number of iterations to wait	
 	.2,		// alpha for partial gc average
 	.5,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *RT4 = &GcPolRT4;
@@ -433,7 +493,10 @@ static GcPolSpec GcPolSpleen4 = {
 	50,		// number of iterations to wait	
 	.2,		// alpha for partial gc average
 	.5,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *Spleen4 = &GcPolSpleen4;
@@ -455,9 +518,11 @@ static GcPolSpec GcPolSpleen1 = {
 	50,		// number of iterations to wait	
 	.2,		// alpha for partial gc average
 	.5,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
-
 GcPolSpec *Spleen1 = &GcPolSpleen1;
 
 static GcPolSpec GcPolSpleen2 = {
@@ -477,7 +542,10 @@ static GcPolSpec GcPolSpleen2 = {
 	50,		// number of iterations to wait	
 	.2,		// alpha for partial gc average
 	.5,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *Spleen2 = &GcPolSpleen2;
@@ -499,7 +567,10 @@ static GcPolSpec GcPolMI1S = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *MI1S = &GcPolMI1S;
@@ -521,7 +592,10 @@ static GcPolSpec GcPolMI4S = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *MI4S = &GcPolMI4S;
@@ -543,7 +617,10 @@ static GcPolSpec GcPolMAXS = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *MAXS = &GcPolMAXS;
@@ -565,10 +642,88 @@ static GcPolSpec GcPolMAXG = {
 	0,		// number of iterations to wait	
 	1,		// alpha for partial gc average
 	1,		// alpha for full gc average
-	1		// beta
+	1,		// beta
+	INT_MAX, // Number of Mallocs before forcing GC
+	INT_MAX,	// ms before force gc if malloc threshold reached
+	INT_MAX	// ms before force gc if malloc threshold not reached
 };
 
 GcPolSpec *MAXG = &GcPolMAXG;
+
+static GcPolSpec GcPolForce1S = {
+	"Force_at_1s",
+	22,		// Policy Number
+	FORCE_GC,      // Policy Type this grows heap to max so rest doesn't matter
+	false,  // MIS policy
+	0,	// minGCTime
+	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
+	0,		// adaptive
+	false,  // spleen policy
+	1,		// resize threshold on GC
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1,		// beta
+	100, 	// Number of Mallocs before forcing GC
+	1000,	// ms before force gc if malloc threshold reached
+	10000	// ms before force gc if malloc threshold not reached
+};
+
+GcPolSpec *Force1S = &GcPolForce1S;
+
+static GcPolSpec GcPolForceHalfS = {
+	"Force_at_.5s",
+	23,		// Policy Number
+	FORCE_GC,      // Policy Type this grows heap to max so rest doesn't matter
+	false,  // MIS policy
+	0,	// minGCTime
+	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
+	0,		// adaptive
+	false,  // spleen policy
+	1,		// resize threshold on GC
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1,		// beta
+	100, 	// Number of Mallocs before forcing GC
+	500,	// ms before force gc if malloc threshold reached
+	5000	// ms before force gc if malloc threshold not reached
+};
+
+GcPolSpec *ForceHalfS = &GcPolForceHalfS;
+
+static GcPolSpec GcPolForceCont = {
+	"Force_Cont",
+	24,		// Policy Number
+	FORCE_GC,      // Policy Type this grows heap to max so rest doesn't matter
+	false,  // MIS policy
+	0,	// minGCTime
+	5,		// 100ms intervals for histogram
+	true,  // if we actively schedule GC
+	0,		// adaptive
+	false,  // spleen policy
+	1,		// resize threshold on GC
+	true,	// resize heap on gc
+	0,		// time to add
+	0,		// time to wait
+	0,		// number of iterations to wait	
+	1,		// alpha for partial gc average
+	1,		// alpha for full gc average
+	1,		// beta
+	100, 	// Number of Mallocs before forcing GC
+	10,	// ms before force gc if malloc threshold reached
+	5000	// ms before force gc if malloc threshold not reached
+};
+
+GcPolSpec *ForceCont = &GcPolForceCont;
 
 const GcPolSpec policies[NUM_POLICIES] = {stockPol, 
 										  GcPolMI2, 
@@ -590,7 +745,10 @@ const GcPolSpec policies[NUM_POLICIES] = {stockPol,
 										  GcPolMI1S, 
 										  GcPolMI4S,
 										  GcPolMAXS,
-										  GcPolMAXG};
+										  GcPolMAXG,
+										  GcPolForce1S,
+										  GcPolForceHalfS,
+										  GcPolForceCont};
 GcPolSpec policy;
 
 /*
@@ -630,16 +788,41 @@ void _logPrint(int logEventType, bool mallocFail, const GcSpec* spec)
                 logMalloc(mallocFail);
                 break;
         case LOG_GC:
+        		#ifndef SKIP_PERFS
+                disableCounters();
+                logCounters(PERF_GENERAL);
+                #endif
                 logGC(spec);
+                #ifndef SKIP_PERFS
+                enableCounters();
+                #endif
                 break;
         case LOG_WAIT_CONC_GC:
+        		#ifndef SKIP_PERFS
+                disableCounters();
+                #endif
                 logConcGC();
+                #ifndef SKIP_PERFS
+                enableCounters();
+                #endif
                 break;
         case LOG_GC_SCHED:
+        		#ifndef SKIP_PERFS
+                disableCounters();
+                #endif
                 logGCSched();
+                #ifndef SKIP_PERFS
+                enableCounters();
+                #endif
                 break;
         case LOG_IGNORE_EXPLICIT:
+        		#ifndef SKIP_PERFS
+                disableCounters();
+                #endif
                 logIgnoreExplicit();
+                #ifndef SKIP_PERFS
+                enableCounters();
+                #endif
                 break;
     }
 }
@@ -669,26 +852,27 @@ void logGC(const GcSpec* spec)
             
             // experimental
             // read the performance counters and print results
-            char custMsg[256];
-            uint64_t *results;//[5] = {0,0,0,0,0};
-            results = (uint64_t*)malloc(sizeof(uint64_t) * 10);
-            results[0] = results[1] = results[2] = results[3] = results[4] = 0;
+//            char custMsg[256];
+//            uint64_t *results;// = {0,0,0,0,0};
+//            results = (uint64_t*)malloc(sizeof(uint64_t) * 10);
+//            results[0] = results[1] = results[2] = results[3] = results[4] = 0;
             #ifdef snappyDebugging
             ALOGD("Robust Log reading pefcounters");
             #endif
-            readCounters(results);
-            sprintf(custMsg, ",\"CPUType\":\""ARCH"\",\"cycles\":%llu,\"instructions\":%llu,\"tlb-stalls\":%llu,\"instr-stalls\":%llu,"
-                            "\"data-stalls\":%llu,\"issue-empty\":%llu,\"no-dispatch\":%llu,\"page-faults\":%llu"
-                ,results[0]
-                ,results[1]
-                ,results[2]
-                ,results[3]
-                ,results[4]
-                ,results[5]
-                ,results[6]
-                ,results[7]);
-            logPrint(LOG_CUSTOM,"perfCountGC", (char*)custMsg);
-            free(results);
+            logCounters(PERF_GC);
+//            readCounters((uint64_t *)results);
+//            sprintf(custMsg, ",\"CPUType\":\""ARCH"\",\"cycles\":%llu,\"instructions\":%llu,\"tlb-stalls\":%llu,\"instr-stalls\":%llu,"
+//                            "\"data-stalls\":%llu,\"issue-empty\":%llu,\"no-dispatch\":%llu,\"page-faults\":%llu"
+//                ,results[0]
+//                ,results[1]
+//                ,results[2]
+//                ,results[3]
+//                ,results[4]
+//                ,results[5]
+//                ,results[6]
+//                ,results[7]);
+//            logPrint(LOG_CUSTOM,"perfCountGC", (char*)custMsg);
+            //free(results);
     }
 
     writeLogEvent(LOG_GC, beginOrEnd.c_str(), "GC", thisGCSeqNumb, spec);
@@ -704,8 +888,7 @@ void logMalloc(bool mallocFail)
     string beginOrEnd;
 
     static u8 lastMallocTime = 0;
-    //u8 currentMallocTime = dvmGetTotalProcessCpuTimeMsec();
-    static int numMallocs = 0;
+    static u8 lastTimed = 0;	// to kick off timed events
 
     // to keep the compiler quiet
     logStart = logStart;
@@ -715,13 +898,20 @@ void logMalloc(bool mallocFail)
         // or if last malloc was less than 100 ms ago and malloc failed
         // log this malloc
         if (mallocFail) {
-            beginOrEnd = "begin";
-            thisMallocSeqNumb = seqNumber++;
-            logStart = false;
-            mallocsDone += numMallocs;
-            writeLogEvent(LOG_TRY_MALLOC, beginOrEnd.c_str(), "TryMalloc", thisMallocSeqNumb, NULL, true);
-            //lastMallocTime = currentMallocTime;
-            numMallocs = 0;
+       		if (!numMallocFails) {
+		        beginOrEnd = "begin";
+		        thisMallocSeqNumb = seqNumber++;
+		        logStart = false;
+		        mallocsDone += numMallocs;
+		        writeLogEvent(LOG_TRY_MALLOC, beginOrEnd.c_str(), "TryMalloc", thisMallocSeqNumb, NULL, true);
+		        //lastMallocTime = currentMallocTime;
+		        numMallocs = 0;
+		        if ((dvmGetRTCTimeMsec() - lastTimed) > 100) {
+		        	timed();
+		        	lastTimed = dvmGetRTCTimeMsec();
+		        }
+            }
+            numMallocFails++;
         }
         
         if (numMallocs > maxMallocs) {
@@ -731,6 +921,7 @@ void logMalloc(bool mallocFail)
 			mallocsDone +=  numMallocs;
             numMallocs = 0;
             if (currentMallocTime - lastMallocTime > 100) {
+                disableCounters();
                 beginOrEnd = "begin";
                 thisMallocSeqNumb = seqNumber++;
                 logStart = false;
@@ -743,9 +934,12 @@ void logMalloc(bool mallocFail)
 				maxMallocs = (mallocsDone >> 4) + 50;
                 numChecks = 0;
 				mallocsDone = 0;
+				numMallocFails = 0;
 
-				// if we've run over a second
+				// if we've run over a tenth second
 			    timed();
+			    lastTimed = dvmGetRTCTimeMsec();
+			    enableCounters();
             }
         }
         numMallocs++;
@@ -835,6 +1029,8 @@ void buildHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, c
 	dvmHeapSourceGetValue(HS_VM_SIZE, heapsLimit, 2);
 	dvmHeapSourceGetValue(HS_BASE, heapsBase, 2);
 	baseAddr = heapsBase[0];
+	heapSize = heapsAlloc[0];
+	heapAllocSizes[heapAllocIndex] = heapsAlloc[0];
 
     if (spleenGC)
         heapsAlloc[0] -= oldSpleenSize;
@@ -851,6 +1047,7 @@ void buildHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, c
     buildBasicEvent(beginEnd, eventName, seqNumber, partial);
 
     sprintf(output, "%s,\"currAlloc0-kB\":%d,\"currFootprint0-kB\":%d,\"currLimit0-kB\":%d,\"currMax0-kB\":%d,\"numObjects0\":%d,\"base0-kB\":%d,\"minAdd0-kB\":%d,\"maxAdd0-kB\":%d,\"arenaSize0-kB\":%d,"
+                    "\"overhead0-kB\":%d,"
                     "\"currAlloc1-kB\":%d,\"currFootprint1-kB\":%d,\"currLimit1-kB\":%d,\"currMax1-kB\":%d,\"numObjects1\":%d,\"threshold-kB\":%f,\"totalAlloced-kB\":%zu",
         partial, 
 		heapsAlloc[0], 
@@ -862,6 +1059,7 @@ void buildHeapEvent(const char* beginEnd,const char* eventName, int seqNumber, c
 		minAdd / 1024,
 		maxAdd / 1024,
 		(maxAdd - minAdd) / 1024,
+		numObjects[0] / 256,
 		heapsAlloc[1], 
 		heapsFootprint[1], 
 		heapsLimit[1],
@@ -930,9 +1128,10 @@ void writeLogEvent(int eventType,const char* beginEnd, const char* eventName, in
                 buildHeapEvent(beginEnd, eventName, seqNumber, temp);
                 if (lastState > 0)
                     GCSeqNumb = lastGCSeqNumber;
-                sprintf(partialEntry, "%s,\"mallocFail\":\"%d\",\"numMallocs\":%d,\"lastAllocSize-B\":%d,\"lastEvent\":%d,\"lastGCSeq\":%d"
+                sprintf(partialEntry, "%s,\"mallocFail\":\"%d\",\"numMallocFails\":%d,\"numMallocs\":%d,\"lastAllocSize-B\":%d,\"lastEvent\":%d,\"lastGCSeq\":%d"
                         ,temp
                         ,(int)mallocFail
+                        ,numMallocFails
                         ,mallocsDone
                         ,lastAllocSize
                         ,lastState
@@ -1134,8 +1333,9 @@ void adjustThreshold()
 	// threshold so an additional 20ms
 	// should elapse before gc runs
 
-	char *custMsg;
-	custMsg = (char *)malloc(512);
+	//char *custMsg;
+	//custMsg = (char *)malloc(512);
+	char custMsg[512];
 	size_t heapsLimit[2], heapsBase[2];
 	dvmHeapSourceGetValue(HS_LIMIT, heapsLimit, 2);
 	dvmHeapSourceGetValue(HS_BASE, heapsBase, 2);
@@ -1149,7 +1349,7 @@ void adjustThreshold()
 			,(firstExhaustSinceGC ? "true" : "false")
 			,freeHistory[0],freeHistory[1],freeHistory[2],freeHistory[3],freeHistory[4]);
 	logPrint(LOG_CUSTOM,"debugLogAdjustNumbs", (char*)custMsg);
-	free(custMsg);
+	//free(custMsg);
 
 	// if there hasn't been an exhaustion since GC
 	// then we shrink the threshold
@@ -1177,7 +1377,7 @@ void adjustThreshold()
  */
 void _initLogFile()
 {
-    //GcPolSpec policy = policies;
+    static int fileTestTried = 0;
     
     initLogDone = 0;
     skipLogging = 0;
@@ -1218,7 +1418,7 @@ void _initLogFile()
         ALOGD("Robust skipping process %s",processName);
         #endif 
         // se if we can open file here
-        if (fileTest != NULL) 
+        if (fileTestTried == 1) 
             return; //file previously opened
         //testTime();
         fileTest = fopen("/sdcard/robust/testFile.txt", "at" );
@@ -1227,6 +1427,15 @@ void _initLogFile()
         //still in zygote so we have root access, enable cpu perf_events
         FILE *proc;
         proc = fopen("/proc/sys/kernel/perf_event_paranoid", "wt");
+        
+        // and create directories in case they're not there
+        // create the directory for log files
+		mkdir("/sdcard/robust", S_IRWXU | S_IRWXG | S_IRWXO);
+		ALOGD("Snappy log creating robust directory results %s", strerror(errno));
+		// create the directory for data files
+		mkdir("/sdcard/robust_data", S_IRWXU | S_IRWXG | S_IRWXO);
+    
+        fileTestTried = 1;
         if (proc)
             fprintf(proc,"-1");
         return;
@@ -1380,6 +1589,15 @@ void _initLogFile()
 
     //LOGD("Robust Log Granularity is %llu", diff2);
 
+	//read heap sizes
+	readHeapSize();
+	
+	// if we're running spleen set heap size to a reasonable start
+	if (spleenPolicy && minHeapSize > (1024 * 1024)) {
+		ALOGD(" Robust Log Setting target heapsize: %u", minHeapSize);
+		dvmSetSize(minHeapSize);
+	}
+
     char baseDir[] = "/sdcard/robust/";
     strcpy(fileName, baseDir);
     strcat(fileName, processName);
@@ -1390,12 +1608,6 @@ void _initLogFile()
 	strcpy(memDup, memDir);
     strcat(memDup, processName);
     strcat(memDup, ".dxt");
-    
-    // create the directory for log files
-    mkdir("/sdcard/robust", S_IRWXU | S_IRWXG | S_IRWXO);
-
-	// create the directory for data files
-    mkdir("/sdcard/robust_data", S_IRWXU | S_IRWXG | S_IRWXO);
 
     #ifdef snappyDebugging
     ALOGD("Robust Log ||%s||", fileName);
@@ -1497,8 +1709,9 @@ void setPolicy(int policyNumb)
 {
     lastGCSeqNumber = 0;
     spleen = NULL;
-    spleenSize = 0;
+    spleenSize = (128 << 10);//0;
     totalAlloced = 0;
+    numMallocFails = 0;
     spleenGC = false;
     // set max grow size to 7/8s max heap size
     maxGrowSize = dvmHeapSourceGetMaximumSize() * (7.0 / 8.0);
@@ -1521,7 +1734,9 @@ void setPolicy(int policyNumb)
 	partialAlpha = policy.partialAlpha;
 	fullAlpha = policy.fullAlpha;
 	beta = policy.beta;
-	
+	mallocGCRate = policy.mallocGCRate;
+	forceGCThresh = policy.forceGCThresh;
+	forceGCNoThresh = policy.forceGCNoThresh;
 }
 
 /*
@@ -1586,8 +1801,11 @@ void writeThreshold(void) {
 	FILE *tFile = fopen(threshFileName, "wt");
 	
 	if (tFile) {
-		fprintf(tFile,"%d", threshold);
+		fprintf(tFile,"%d\n", threshold);
+		fprintf(tFile,"%d\n", heapSize);
 		fclose(tFile);
+	} else {
+		ALOGD("Robust Log unable to open threshold file %s %s", fileName,strerror(errno));
 	}
 }
 
@@ -1605,16 +1823,98 @@ void readThreshold(void) {
 		if (!fscanf(tFile,"%d", &threshold)) {
 			threshold = (128 << 10);
 		}
+		if (!fscanf(tFile,"%d", &heapSize)) {
+			heapSize = 0;
+		}
 		fclose(tFile);
 	}
 	// check to avoid bad thresholds from data corruption
 	// if the threshold is too large or small set it to default
 	// Min is 100 bytes Max is 10 meg
-	ALOGD("Robust Log Threshold before check %d", threshold);
+	ALOGD("Robust Log Threshold before check %d heapsize %d", threshold, heapSize);
 	if ((threshold < 100) || (threshold > (1024 * 1024 * 10))) {
 	    threshold = CONCURRENT_START_DEFAULT;
 	}
-	ALOGD("Robust Log Threshold after check %d", threshold);
+	if ((heapSize < (1 * 1024 * 1024)) || (heapSize > (1024 * 1024 * 100))) {
+	    heapSize = (1 * 1024 * 1024);
+	}
+	ALOGD("Robust Log Threshold after check %d heapsize %d", threshold, heapSize);
+}
+
+void writeHeapSize(void)
+{
+	//static int bytesWritten = 0;
+	static int numEvents = -60; // log only first 60
+	
+	char baseDir[] = "/sdcard/robust_data/";
+	char heapFileName[128];
+    strcpy(heapFileName, baseDir);
+    strcat(heapFileName, thisProcessName);
+	strcat(heapFileName, "_heapSize\0");
+    strcat(heapFileName, ".txt");
+	
+	if (!numEvents) {
+		return;
+	}
+	
+	numEvents++;
+	FILE *tFile = fopen(heapFileName, "wt");
+	
+	// if the file didn't open, could be it doesn't exist,
+	// make it exist
+//	if (!tFile) {
+//		tFile = fopen(heapFileName, "at");
+//		fclose(tFile);
+//		tFile = fopen(heapFileName, "r+t");
+//	}
+//	
+	if (tFile) {
+		// seek to the last place we wrote too for this execution
+//		fseek(tFile, -bytesWritten, SEEK_END);
+//		bytesWritten = fprintf(tFile,"%d\n",heapSize);
+		int i;
+		for (i = 0; i <= heapAllocIndex; i++) {
+			fprintf(tFile, "%d\n", heapAllocSizes[i]);
+		}
+		fclose(tFile);
+	} else {
+		ALOGD("Robust Log unable to open heap file %s %s", fileName,strerror(errno));
+	}
+	return;
+}
+
+void readHeapSize(void)
+{
+	char baseDir[] = "/sdcard/robust_data/";
+	char heapFileName[128];
+    strcpy(heapFileName, baseDir);
+    strcat(heapFileName, thisProcessName);
+	strcat(heapFileName, "_heapSize\0");
+    strcat(heapFileName, ".txt");
+	
+	heapAllocIndex = 0;
+	minHeapSize = INT_MAX;
+	
+	int i;
+	for (i = 0; i < HEAP_LOG_LENGTH; ++i) {
+		heapAllocSizes[i] = 0;
+	}
+	
+	FILE *tFile = fopen(heapFileName, "rt");
+	if (tFile)
+	{
+		while (fscanf(tFile,"%d",&heapAllocSizes[heapAllocIndex]) > 0) {
+			if (heapAllocSizes[heapAllocIndex] < minHeapSize) {
+				minHeapSize = heapAllocSizes[heapAllocIndex];
+			}
+			heapAllocIndex = (heapAllocIndex + 1) % HEAP_LOG_LENGTH;
+		}
+		fclose(tFile);
+	}	
+	if (minHeapSize == INT_MAX) {
+		minHeapSize = 0;
+	}
+	return;
 }
 
 void timed(void) 
@@ -1622,6 +1922,7 @@ void timed(void)
 	static int seconds = 0;
 	static int tenths = 0;
 	static size_t currTick = 0;
+	//static bool countersEnabled = false;
 
     currTick++;	
 	// get alloc rate over last 200ish ms
@@ -1631,6 +1932,41 @@ void timed(void)
 	currAllocHistory = (currAllocHistory + 1) % 3;
 	allocHistory[currAllocHistory] = totalAlloced;
 	
+	// enable counters and log
+	if (!countersReady()) {
+	    setupCounters();
+	    //countersEnabled = true;
+	}
+	
+	logCounters(PERF_GENERAL);
+	resetCounters();
+	
+	// Check to see if we're running force policy if so check times and kick GC
+	if (FORCE_GC & policyNumber) {
+		// if we've hit the threshold rate and enough time has elapsed
+		if (((numMallocs / 10) > mallocGCRate) && ((lastGCTime + forceGCThresh) > dvmGetRTCTimeMsec())) {
+			#ifdef snappyDebugging
+			ALOG("Snappy forcing GC mallocs %d  malloc GC Rate %d forceGCThresh %d lastGCTime %llu currenttime %llu", 
+					numMallocs, 
+					mallocGCRate,
+					forceGCThresh,
+					lastGCTime,
+					dvmGetRTCTimeMsec());
+			#endif
+			dvmInitConcGC();
+		} else if ((lastGCTime + forceGCNoThresh) > dvmGetRTCTimeMsec()) {
+			#ifdef snappyDebugging
+			ALOG("Snappy forcing GC mallocs %d  malloc GC Rate %d forceGCThresh %d lastGCTime %llu currenttime %llu", 
+			numMallocs, 
+			mallocGCRate,
+			forceGCThresh,
+			lastGCTime,
+			dvmGetRTCTimeMsec());
+			#endif
+			dvmInitConcGC();
+		}
+	}
+	 
 	// wait 15 seconds to avoid startup behaviour
 	if (currTick > 150) {
 	    // if our delta is bigger than the current spleen size, change the spleen size
@@ -1653,12 +1989,48 @@ void timed(void)
 	    if (seconds == 10) {
 	        // stuff that needs to happen every 10 seconds goes here
 		    writeThreshold();
+		    writeHeapSize();
 		    seconds = 0;
 	    }
 	    seconds++;
 	    tenths = 0;
     }
     tenths++;
+}
+
+/* prints the current performance counters to the log */
+void logCounters(int msgType)
+{
+	#ifdef SKIP_PERFS
+	return;
+	#else
+    if (countersReady()) {
+        char custMsg[256];
+        uint64_t results[10];// = {0,0,0,0,0};
+        //results = (uint64_t*)malloc(sizeof(uint64_t) * 10);
+        results[0] = results[1] = results[2] = results[3] = results[4] = 0;
+        #ifdef snappyDebugging
+        ALOGD("Robust Log reading pefcounters");
+        #endif
+        readCounters(results);
+        sprintf(custMsg, ",\"CPUType\":\""ARCH"\",\"cycles\":%llu,\"instructions\":%llu,\"tlb-stalls\":%llu,\"instr-stalls\":%llu,"
+                        "\"data-stalls\":%llu,\"load-store-instr\":%llu,\"fp-instr\":%llu,\"page-faults\":%llu,\"context-switches\":%llu"
+            ,results[0]
+            ,results[1]
+            ,results[2]
+            ,results[3]
+            ,results[4]
+            ,results[5]
+            ,results[6]
+            ,results[7]
+            ,results[8]);
+            
+        if (msgType == PERF_GC)
+            logPrint(LOG_CUSTOM,"perfCountGC", (char*)custMsg);
+        else
+            logPrint(LOG_CUSTOM,"perfCount", (char*)custMsg);
+    }
+    #endif
 }
 /***************************************************
  * Utility functions below
@@ -1901,6 +2273,10 @@ unsigned int resizeThreshold;
 unsigned short timeToWait;
 unsigned short numIterations;
 unsigned short currIterations;
+int mallocGCRate;
+int forceGCThresh;
+int forceGCNoThresh;
+		
 int lastState;
 float partialAlpha;
 float fullAlpha;

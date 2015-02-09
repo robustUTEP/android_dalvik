@@ -1728,3 +1728,16 @@ void dvmFreeSpleen(void* spleen)
     ALOGD("Robust Log Freed Spleen %zu, value %p", freed, spleen);
     #endif
 }
+
+/*
+ * used to grow heap to a specific size
+ */
+void dvmSetSize(size_t size)
+{
+	HeapSource *hs = gHs;
+	mspace msp = hs->heaps[0].msp;
+	
+	setIdealFootprint(size + getSoftFootprint(false));
+    mspace_set_footprint_limit(msp, size);
+    hs->softLimit = size + getSoftFootprint(false);
+}
