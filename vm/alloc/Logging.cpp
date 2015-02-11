@@ -2264,7 +2264,7 @@ int testMethod(char *logMessage)
 		ifProcessInit = true;
 		
 		if (mallocLogFile) {
-			fprintf(mallocLogFile, "Begin logging:\nwcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
+			fprintf(mallocLogFile, "\nBegin logging:\nwcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
 					wcTime, appTime, logMessage);
 			fflush(mallocLogFile);
 			mSuccess = 1;
@@ -2275,7 +2275,7 @@ int testMethod(char *logMessage)
 		logMessage[0] = '\0';
 	} else {
 		if (mallocLogFile) {
-			fprintf(mallocLogFile, "wcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
+			fprintf(mallocLogFile, "\nwcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
 					wcTime, appTime, logMessage);
 			fflush(mallocLogFile);
 			mSuccess = 1;
