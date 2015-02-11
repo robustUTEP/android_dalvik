@@ -845,7 +845,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
     
     //# Snappy mod start
     /* *** dump heap *** */
-	saveHeap();
+//	saveHeap();
 	gcStartTime = dvmGetRTCTimeMsec();
     //# Snappy mod end
 
@@ -1019,7 +1019,7 @@ void dvmCollectGarbageInternal(const GcSpec* spec)
 
     //# Snappy mod start
     /* *** dump heap *** */
-	saveHeap();
+//	saveHeap();
     //# Snappy mod end
     gcHeap->gcRunning = false;
 

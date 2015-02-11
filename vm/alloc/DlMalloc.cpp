@@ -36,7 +36,7 @@ static void heap_error(const char* msg, const char* function, void* p);
  * dlmalloc for our use for mspaces (regular dlmalloc is still declared
  * in bionic).
  */
-#include "../../../bionic/libc/upstream-dlmalloc/malloc.c"
+#include "malloc.c"
 
 
 static void heap_error(const char* msg, const char* function, void* p) {

@@ -1381,7 +1381,7 @@ void _initLogFile()
     
     initLogDone = 0;
     skipLogging = 0;
-	dumpHeap = false;
+    dlmStats = 0;
 
     /* Get process name */
     const char* processName = get_process_name();
@@ -1526,7 +1526,7 @@ void _initLogFile()
         // misses the fact that it's above
         polNumb = DEFAULT_POLICY;
         skipLogging = 1;
-
+        dlmStats = 0;
         setPolicy(polNumb);
         logReady = true;
         return; // GC Policy file doesn't exist so we just run defaults anyway
@@ -1559,10 +1559,10 @@ void _initLogFile()
          } else {
 			polNumb = DEFAULT_POLICY;
 		}
-		ALOGD("Robust Log enableDump %s",enableDump);
-		if (!strncmp(enableDump, "true", 4)) {
-			dumpHeap = true;
-			ALOGD("Robust Log Enabling Heap dumps");
+		ALOGD("Robust Log enable dlmStats %s",enableDump);
+        dlmStats = atoi(enableDump);
+		if (dlmStats) {
+			ALOGD("Robust Log Enabling dlmStats");
 		}
     }
         
@@ -1651,6 +1651,7 @@ void _initLogFile()
         fflush(notLogged);
         ALOGD("Robust Log fail open %s %s", fileName,strerror(errno));
         logReady = false;
+		inZygote = false;
 		preDone = 1; // inits should never reach here but just in case
         return;
     }
@@ -1760,15 +1761,6 @@ void savePtr(void *ptr, size_t size)
 		minAdd = tmp;
 	if (tmp + size > maxAdd)
 		maxAdd = tmp + size;
-}
-
-void saveHeap(void) 
-{
-	if (dumpHeap) {
-	    ALOGD("Robust Log Starting dump");
-		dlmalloc_inspect_all(memDumpHandler, NULL);
-	    ALOGD("Robust Log Finishing dump");
-	}
 }
 
 void memDumpHandler(void* start, void* end, size_t used_bytes,
@@ -2251,6 +2243,52 @@ int testTime(void)
     return(0);
 }
 
+FILE* mallocLogFile = NULL;
+bool ifProcessInit = false;
+int testMethod(char *logMessage)
+{
+	u8 wcTime = dvmGetRTCTimeMsec();
+	u8 appTime = dvmGetTotalProcessCpuTimeMsec();
+	int mSuccess = -1;
+	
+	if (!ifProcessInit) {
+		const char* processName = get_process_name();
+		char myProcessName[128];
+		strcpy(myProcessName, processName);
+		char baseDir[] = "/sdcard/robust/";
+		char mFileName[128];
+		strcpy(mFileName, baseDir);
+		strcat(mFileName, myProcessName);
+		strcat(mFileName, ".dlm");
+		mallocLogFile = fopen(mFileName, "at");
+		ifProcessInit = true;
+		
+		if (mallocLogFile) {
+			fprintf(mallocLogFile, "Begin logging:\nwcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
+					wcTime, appTime, logMessage);
+			fflush(mallocLogFile);
+			mSuccess = 1;
+		} else {
+			ALOGD("dlmstats_init %s can't open file %s\n", myProcessName, strerror(errno));
+			mSuccess = 0;
+		}
+		logMessage[0] = '\0';
+	} else {
+		if (mallocLogFile) {
+			fprintf(mallocLogFile, "wcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
+					wcTime, appTime, logMessage);
+			fflush(mallocLogFile);
+			mSuccess = 1;
+		} else {
+			ALOGD("dlmstats %s can't open file %s\n", get_process_name(), strerror(errno));
+			mSuccess = 0;
+		}
+		logMessage[0] = '\0';
+	}
+	return mSuccess;
+}
+
+int dlmStats = 0;
 int skipLogging = 0;
 size_t thresholdOnGC = 0;
 int seqNumber;
@@ -2289,7 +2327,6 @@ size_t lastAllocSize;
 size_t minAdd;
 size_t maxAdd;
 size_t maxGrowSize;
-bool dumpHeap = false;
 bool inZygote = true;
 int lastGCSeqNumber;
 void* spleen;
