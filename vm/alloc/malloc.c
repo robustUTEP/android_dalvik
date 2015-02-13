@@ -5730,7 +5730,7 @@ void* mspace_malloc(mspace msp, size_t bytes) {
           char tmp[128];
           //      mallocChunks[mCount] = nb; //robust
           //      mallocAddrs[mCount] = mem;
-          sprintf(tmp, "M %i %p\n",nb, mem);
+          sprintf(tmp, "M %i %p %d\n",nb, mem, bytes);
           strcat(logBuffer, tmp);
           mCount++;
           
