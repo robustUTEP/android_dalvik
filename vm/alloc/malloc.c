@@ -4,7 +4,8 @@
 extern int testMethod(char*);
 extern int dlmStats; //Enable dlm stats
 //extern int logRate;
-char logBuffer[1000000];
+
+char logBuffer[500000];
 
 //size_t mallocChunks [LOGRATE+1];
 //void *freeChunks [LOGRATE+1];
@@ -13,8 +14,8 @@ void *freePrevious = 0;
 
 unsigned int mCount = 0;
 
-unsigned int sBinCount = 0;
-unsigned int tBinCount = 0;
+//unsigned int sBinCount = 0;
+//unsigned int tBinCount = 0;
 
 /*
   This is a version (aka dlmalloc) of malloc/free/realloc written by
@@ -2624,11 +2625,11 @@ struct malloc_state {
   size_t     exts;
 
   //robust
-  char       sBinPopulation [NSMALLBINS];
+//  char       sBinPopulation [NSMALLBINS];
 //  char       sBinChunkSize [(NSMALLBINS+1)*2];
-  char       tBinPopulation [NTREEBINS];
-  char       tBinChunkSize [NTREEBINS];
-  char       requestedPopulation [NSMALLBINS+NTREEBINS];
+//  char       tBinPopulation [NTREEBINS];
+//  char       tBinChunkSize [NTREEBINS];
+//  char       requestedPopulation [NSMALLBINS+NTREEBINS];
 //  size_t     mallocChunks [LOGRATE+1];
 //  size_t     freeChunks   [LOGRATE+1];
 };
@@ -3630,7 +3631,7 @@ static void internal_malloc_stats(mstate m) {
     mark_smallmap(M, I);\
   else if (RTCHECK(ok_address(M, B->fd))) {\
     F = B->fd;\
-    sBinCount++;\
+/*    sBinCount++;\*/\
   }\
   else {\
     CORRUPTION_ERROR_ACTION(M);\
@@ -3639,7 +3640,7 @@ static void internal_malloc_stats(mstate m) {
   F->bk = P;\
   P->fd = F;\
   P->bk = B;\
-  M->sBinPopulation[I]++;\
+/*  M->sBinPopulation[I]++;\*/\
 }
 
 /* Unlink a chunk from a smallbin  */
@@ -3658,7 +3659,7 @@ static void internal_malloc_stats(mstate m) {
                      (ok_address(M, B) && B->fd == P))) {\
       F->bk = B;\
       B->fd = F;\
-      sBinCount--;\
+/*      sBinCount--;\*/\
     }\
     else {\
       CORRUPTION_ERROR_ACTION(M);\
@@ -3667,7 +3668,7 @@ static void internal_malloc_stats(mstate m) {
   else {\
     CORRUPTION_ERROR_ACTION(M);\
   }\
-  M->sBinPopulation[I]--;\
+  /*M->sBinPopulation[I]--;\*/\
 }
 
 /* Unlink the first chunk from a smallbin */
@@ -3682,8 +3683,8 @@ static void internal_malloc_stats(mstate m) {
   else if (RTCHECK(ok_address(M, F) && F->bk == P)) {\
     F->bk = B;\
     B->fd = F;\
-    sBinCount--;\
-    M->sBinPopulation[I]--;\
+/*    sBinCount--;\
+    M->sBinPopulation[I]--;\*/\
   }\
   else {\
     CORRUPTION_ERROR_ACTION(M);\
@@ -3755,10 +3756,10 @@ static void internal_malloc_stats(mstate m) {
       }\
     }\
   }\
-  tBinCount++;\
+/*  tBinCount++;\
   M->tBinPopulation[I]++;\
   if (M->tBinChunkSize[I] < S) \
-    M->tBinChunkSize[I] = S;\
+    M->tBinChunkSize[I] = S;\*/\
 }
 
 /*
@@ -3851,8 +3852,8 @@ static void internal_malloc_stats(mstate m) {
       }\
     }\
   }\
-  tBinCount--;\
-  M->tBinPopulation[X->index]--;\
+/*  tBinCount--;\
+  M->tBinPopulation[X->index]--;\*/\
 }
 
 /* Relays to large vs small bin operations */
@@ -3985,14 +3986,15 @@ static void init_bins(mstate m) {
   for (i = 0; i < NSMALLBINS; ++i) {
     sbinptr bin = smallbin_at(m,i);
     bin->fd = bin->bk = bin;
-    m->sBinPopulation[i] = 0;
-    m->requestedPopulation[i] = 0;
+//    m->sBinPopulation[i] = 0;
+//    m->requestedPopulation[i] = 0;
   }
-  for (i = 0; i < NTREEBINS; i++) {
-    m->tBinPopulation[i] = 0;
-    m->tBinChunkSize[i] = 0;
-    m->requestedPopulation[NSMALLBINS+i] = 0;
-  }
+//  for (i = 0; i < NTREEBINS; i++) {
+//    m->tBinPopulation[i] = 0;
+//    m->tBinChunkSize[i] = 0;
+//    m->requestedPopulation[NSMALLBINS+i] = 0;
+//  }
+
   logBuffer[0] = '\0';
 }
 
@@ -4524,7 +4526,7 @@ static void* tmalloc_large(mstate m, size_t nb) {
   tchunkptr t;
   bindex_t idx;
   compute_tree_index(nb, idx);
-  m->requestedPopulation[NSMALLBINS+idx]++;
+//  m->requestedPopulation[NSMALLBINS+idx]++;//robust
   if ((t = *treebin_at(m, idx)) != 0) {
     /* Traverse tree for this bin looking for node with size == nb */
     size_t sizebits = nb << leftshift_for_tree_index(idx);
@@ -4598,7 +4600,7 @@ static void* tmalloc_small(mstate m, size_t nb) {
   compute_bit2idx(leastbit, i);
   v = t = *treebin_at(m, i);
   rsize = chunksize(t) - nb;
-  m->requestedPopulation[NSMALLBINS+i]++;
+//  m->requestedPopulation[NSMALLBINS+i]++;//robust
   while ((t = leftmost_child(t)) != 0) {
     size_t trem = chunksize(t) - nb;
     if (trem < rsize) {
@@ -5641,7 +5643,7 @@ void* mspace_malloc(mspace msp, size_t bytes) {
         mem = chunk2mem(p);
         check_malloced_chunk(ms, mem, nb);
         
-        ms->requestedPopulation[idx]++; //robust
+//        ms->requestedPopulation[idx]++; //robust
         
         goto postaction;
       }
@@ -5670,7 +5672,7 @@ void* mspace_malloc(mspace msp, size_t bytes) {
           }
           mem = chunk2mem(p);
           check_malloced_chunk(ms, mem, nb);
-          ms->requestedPopulation[i]++;
+//          ms->requestedPopulation[i]++;//robust
           goto postaction;
         }
 
@@ -5730,7 +5732,7 @@ void* mspace_malloc(mspace msp, size_t bytes) {
           char tmp[128];
           //      mallocChunks[mCount] = nb; //robust
           //      mallocAddrs[mCount] = mem;
-          sprintf(tmp, "M %i %p %d\n",nb, mem, bytes);
+          sprintf(tmp, "M %i %p %i\n",nb, mem, bytes);
           strcat(logBuffer, tmp);
           mCount++;
           
@@ -5763,7 +5765,7 @@ void* mspace_malloc(mspace msp, size_t bytes) {
               //          strcat(logBuffer, tmp);
               //        }
               
-              sprintf(tmp, "M %i %p\n",nb, mem);
+              sprintf(tmp, "M %i %p %i\n",nb, mem, bytes);
               strcat(logBuffer, tmp);
               
               //        sprintf(tmp,"DV %i\nmCount %i\n",ms->dvsize, mCount);
