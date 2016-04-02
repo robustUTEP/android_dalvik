@@ -309,6 +309,11 @@ void logCounters(int msgType);
 int testMethod(char*);
 
 /*
+ * Appends time stamp to buffer
+ */
+int addTimeStamp(char *mallocLogFile);
+
+/*
  * Get the per-process CPU time, in nanoseconds
  *
  * The amount of time the process had been executing

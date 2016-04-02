@@ -1,18 +1,21 @@
 //robustdl
-#define LOGRATE 5000
+#define LOGRATE 70000 
 
 extern int testMethod(char*);
-extern int dlmStats; //Enable dlm stats
+extern int addTimeStamp(char *mallocLogFile);
+extern int dlmStats; //if dlmstats logging should be enabled
 //extern int logRate;
 
-char logBuffer[500000];
+char logBuffer[2500000]; //LOGRATE * 32 (Plus some leeway)
+unsigned int bufferPosition = 0;
 
 //size_t mallocChunks [LOGRATE+1];
 //void *freeChunks [LOGRATE+1];
 void *freePrevious = 0;
 //void *mallocAddrs [LOGRATE+1];
 
-unsigned int mCount = 0;
+unsigned int mCount = 0; //counter for malloc events
+unsigned int tCount = 0; //counter for time stamp
 
 //unsigned int sBinCount = 0;
 //unsigned int tBinCount = 0;
@@ -5189,6 +5192,7 @@ static size_t internal_bulk_free(mstate m, void* array[], size_t nelem) {
   if (!PREACTION(m)) {
     void** a;
     void** fence = &(array[nelem]);
+    freePrevious = (void*)0;
     for (a = array; a != fence; ++a) {
       void* mem = *a;
       if (mem != 0) {
@@ -5208,6 +5212,24 @@ static size_t internal_bulk_free(mstate m, void* array[], size_t nelem) {
           if (b != fence && *b == chunk2mem(next)) {
             size_t newsize = chunksize(next) + psize;
             set_inuse(m, p, newsize);
+
+	    //robustdl
+	    if (dlmStats) {	    	
+	      if (mCount < LOGRATE) { /* add entry to buffer */
+		bufferPosition = sprintf((char*)logBuffer+bufferPosition, "F %p\n", b);
+		mCount++; tCount++;
+	      } else { /* flush buffer to file */
+		mCount = 0; tCount = 0;
+		sprintf((char*)logBuffer+bufferPosition,"F %p\n", b);
+		testMethod((char*)logBuffer);
+		bufferPosition = 0;
+	      }
+	      if (tCount == 5000 && mCount != LOGRATE) { /* add timestamp */
+		bufferPosition = addTimeStamp((char*)logBuffer+bufferPosition);
+		tCount = 0;
+	      } 	      
+	    }
+	    //endrobustdl
             *b = chunk2mem(p);
           }
           else
@@ -5222,26 +5244,19 @@ static size_t internal_bulk_free(mstate m, void* array[], size_t nelem) {
       if (dlmStats) {
         if (mem != freePrevious) {
           freePrevious = mem;
-          char tmp[128];
-          if (mCount < LOGRATE) {
-            //          freeChunks[mCount] = mem; //robust
-            
-            sprintf(tmp, "F %p\n", mem);
-            strcat(logBuffer, tmp);
-            mCount++;
-          }
-          else if (mCount == LOGRATE) {
-            mCount = 0;
-            //          if (dlmStats) {
-            //            unsigned int i;
-            //            char tmp[256];
-            //            for (i=0; i < LOGRATE; ++i) {
-            sprintf(tmp,"F %p\n", mem);
-            strcat(logBuffer, tmp);
-            //            }
-            testMethod((char*)logBuffer);
-            //          }
-          }
+	  if (mCount < LOGRATE) { /* add entry to buffer */
+            bufferPosition = sprintf((char*)logBuffer+bufferPosition, "F %p\n", mem);
+	    mCount++; tCount++;
+          } else { /* flush buffer to file */
+            mCount = 0; tCount = 0;
+            sprintf((char*)logBuffer+bufferPosition,"F %p\n", mem);
+	    testMethod((char*)logBuffer);
+            bufferPosition = 0;
+	  }
+	  if (tCount == 5000 && mCount != LOGRATE) { /* add timestamp */
+	    bufferPosition = addTimeStamp((char*)logBuffer+bufferPosition);
+	    tCount = 0;
+	  } 
         }
       }
       //endrobustdl
@@ -5729,49 +5744,19 @@ void* mspace_malloc(mspace msp, size_t bytes) {
   postaction:
       // Begin robustdl
       if (dlmStats) {
-          char tmp[128];
-          //      mallocChunks[mCount] = nb; //robust
-          //      mallocAddrs[mCount] = mem;
-          sprintf(tmp, "M %i %p %i\n",nb, mem, bytes);
-          strcat(logBuffer, tmp);
-          mCount++;
-          
-          
-          if ((mCount == LOGRATE)) {
-              mCount = 0;
-              
-              //        unsigned int i;
-              //        char tmp[128];
-              //        strcat(logBuffer,"FB free=[");
-              //        for (i = 0; i < NSMALLBINS; ++i) {
-              //          sprintf(tmp,"%i:%i, ", i+1, ms->sBinPopulation[i]);
-              //          strcat(logBuffer, tmp);
-              //        }
-              //        for (i=0; i < NTREEBINS; ++i) {
-              //          sprintf(tmp,"%i:%i, ", ms->tBinChunkSize[i], ms->tBinPopulation[i]);
-              //          strcat(logBuffer, tmp);
-              //        }
-              //        strcat(logBuffer, "]\nRB reqCount=[");
-              //        for (i=0; i < NSMALLBINS+NTREEBINS; i++) {
-              //          if (i < NSMALLBINS)
-              //            sprintf(tmp,"%i:%i, ", i+1, ms->requestedPopulation[i]);
-              //          else
-              //            sprintf(tmp,"%i:%i, ", ms->tBinChunkSize[i-NSMALLBINS], ms->requestedPopulation[i]);
-              //          strcat(logBuffer, tmp);
-              //        }
-              //        strcat(logBuffer, "]\n");
-              //        for (i=0; i < LOGRATE; ++i) {
-              //          sprintf(tmp,"M %i %p\n", mallocChunks[i], mallocAddrs[i]);
-              //          strcat(logBuffer, tmp);
-              //        }
-              
-              sprintf(tmp, "M %i %p %i\n",nb, mem, bytes);
-              strcat(logBuffer, tmp);
-              
-              //        sprintf(tmp,"DV %i\nmCount %i\n",ms->dvsize, mCount);
-              //        strcat(logBuffer, tmp);
-              testMethod((char*)logBuffer);
-          }
+	if (mCount < LOGRATE) { 		/* add entry to buffer */
+	  bufferPosition = sprintf((char*)logBuffer+bufferPosition, "M %i %p %i\n",nb, mem, bytes);
+	  mCount++; tCount++;
+	} else { /* flush buffer to file */
+	  mCount = 0; tCount = 0;
+	  sprintf((char*)logBuffer+bufferPosition, "M %i %p %i\n",nb, mem, bytes);
+          testMethod((char*)logBuffer);
+	  bufferPosition = 0;
+	}
+	if(tCount == 5000 && mCount != LOGRATE) { /* add time stamp */
+	  bufferPosition = addTimeStamp((char*)logBuffer+bufferPosition);
+	  tCount = 0;
+	} 
       }
       // End robustdl
     POSTACTION(ms);

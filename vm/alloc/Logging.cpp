@@ -89,46 +89,46 @@ int currGCAverage;
 //GC Policies
 //typedef struct GcPolSpec GcPolSpec
 struct GcPolSpec {
-        /* Name of the policy */
-        const char *name;
-        /* Policy Number */
-        int policyNumber;
-        /* Policy Type */
-        int type;
-        /* If STW (foreground only policy) */
-        bool MIS;
-        /* Minimum GC time in ms*/
-        unsigned int minTime;
-        /* number of 100ms increments keep size log */
-        unsigned int intervals;
-        /* if policy actively schedules GC */
-        bool schedulesGC;
-		/* is this an adaptive policy */
-		unsigned int adaptive;
-		/* is this a spleen policy */
-		bool spleen;
-		/* resize threshold on GC */
-		unsigned int resizeThreshold;
-		/* disable heap resize on GC */
-		bool resizeOnGC;
-		/* number of ms to push forward if GC finishes early */
-		unsigned short timeToAdd;
-		/* number of ms to wait for conc GC to complete */
-		unsigned short timeToWait;
-		/* number of times to wait before running full GC */
-		unsigned short numIterations;
-		/* alpha for partial GC weight average */
-		float partialAlpha;
-		/* alpha for full GC weight average */
-		float fullAlpha;
-		/* beta for partial/full GC scalling */
-		float beta;
-		/* how many mallocs till we kick off GC */
-		int mallocGCRate;
-		/*  ms before force gc if malloc threshold reached */
-		int forceGCThresh;
-		/* ms before force gc if malloc threshold not reached */
-		int forceGCNoThresh;
+  /* Name of the policy */
+  const char *name;
+  /* Policy Number */
+  int policyNumber;
+  /* Policy Type */
+  int type;
+  /* If STW (foreground only policy) */
+  bool MIS;
+  /* Minimum GC time in ms*/
+  unsigned int minTime;
+  /* number of 100ms increments keep size log */
+  unsigned int intervals;
+  /* if policy actively schedules GC */
+  bool schedulesGC;
+  /* is this an adaptive policy */
+  unsigned int adaptive;
+  /* is this a spleen policy */
+  bool spleen;
+  /* resize threshold on GC */
+  unsigned int resizeThreshold;
+  /* disable heap resize on GC */
+  bool resizeOnGC;
+  /* number of ms to push forward if GC finishes early */
+  unsigned short timeToAdd;
+  /* number of ms to wait for conc GC to complete */
+  unsigned short timeToWait;
+  /* number of times to wait before running full GC */
+  unsigned short numIterations;
+  /* alpha for partial GC weight average */
+  float partialAlpha;
+  /* alpha for full GC weight average */
+  float fullAlpha;
+  /* beta for partial/full GC scalling */
+  float beta;
+  /* how many mallocs till we kick off GC */
+  int mallocGCRate;
+  /*  ms before force gc if malloc threshold reached */
+  int forceGCThresh;
+  /* ms before force gc if malloc threshold not reached */
+  int forceGCNoThresh;
 };
 
 static GcPolSpec stockPol = {
@@ -1394,24 +1394,23 @@ void _initLogFile()
     threshold = (128 << 10);
     threshSet = false;
     schedGC = false;
-	firstExhaustSinceGC = true;
-	lastExhaustion = 0;
+    firstExhaustSinceGC = true;
+    lastExhaustion = 0;
     inGC = 0;   
-	thresholdOnGC = 0;
-	minSleepTime.tv_sec = 0;
-	minSleepTime.tv_nsec = 1000000L; // 1ms
-	currIterations = 0;
+    thresholdOnGC = 0;
+    minSleepTime.tv_sec = 0;
+    minSleepTime.tv_nsec = 1000000L; // 1ms
+    currIterations = 0;
     maxAdd = 0;
-	minAdd = (size_t) - 1;
+    minAdd = (size_t) - 1;
  
-    // defaults
-    // MI2A and no logging
+    // defaults and no logging
     int polNumb = DEFAULT_POLICY;
 
     // if we're a blacklisted process
     // skip logging
-	// Original code that skips certain processes
-	#ifdef dontLogAll
+    // Original code that skips certain processes
+#ifdef dontLogAll
     if (!strncmp(processName, "zygote",6)) {
         // zygote is where everyone's spawned so we can't turn off logging here
         #ifdef snappyDebugging
@@ -1430,10 +1429,10 @@ void _initLogFile()
         
         // and create directories in case they're not there
         // create the directory for log files
-		mkdir("/sdcard/robust", S_IRWXU | S_IRWXG | S_IRWXO);
-		ALOGD("Snappy log creating robust directory results %s", strerror(errno));
-		// create the directory for data files
-		mkdir("/sdcard/robust_data", S_IRWXU | S_IRWXG | S_IRWXO);
+	mkdir("/sdcard/robust", S_IRWXU | S_IRWXG | S_IRWXO);
+	ALOGD("Snappy log creating robust directory results %s", strerror(errno));
+	// create the directory for data files
+	mkdir("/sdcard/robust_data", S_IRWXU | S_IRWXG | S_IRWXO);
     
         fileTestTried = 1;
         if (proc)
@@ -1454,31 +1453,59 @@ void _initLogFile()
         setPolicy(polNumb);
         return;
     }
-	#else
-	// check if we're some sort of preinitialization process
-	if (!strncmp(processName, "zygote",6) || !strncmp(processName, "system_server", 6) || !strncmp(processName, "unknown", 6)
-            || !strncmp(processName, "<pre", 4) || !strncmp(processName, "dexopt", 6)) {
 
-		// if we are and we've already been initialized bail out
-		if (preinit && preDone) {
-			return;
-		}
-
-		notLogged = fopen("/sdcard/robust/notLogged.txt", "at" );
-		others = fopen("/sdcard/robust/others.txt", "at" );
-        if (notLogged != NULL) {
-            ALOGD("Robust Test file open successful");
-			// set the buffer for others to something fairly large
-			// since it's shared across processes
-			setvbuf(fileLog, NULL, _IOFBF, 40960);
-        } else {
-            ALOGD("Robust Log Test fail open /sdcard/robust/notLogged.txt %s",strerror(errno));
-        }
-		preinit = 1;
-	} else {
-		preinit = 0; // we're a regular process
+      //check if process is whitelisted
+      char isWhitelisted = 0;
+      FILE *wlfd = fopen("/sdcard/robust/whitelist.txt","rt");
+      if (wlfd != NULL) {
+	char listEntry[64];
+	int b = strlen(processName);
+	while(!feof(wlfd)) {
+	  fscanf(wlfd, "%s", listEntry);
+	  //ALOGD("pn:%s le:%s %d",processName,listEntry,d);
+	  if (!strncmp(processName, listEntry, b)){
+	    isWhitelisted = 1;
+	    break;
+	  }
 	}
-	#endif
+	fclose(wlfd);
+	if(!isWhitelisted){
+	  ALOGD("Process is not whitelisted. Skipping process %s",processName);
+	  skipLogging = 1;
+	  setPolicy(polNumb);
+	  return; 
+	} //else {
+	  //ALOGD("Robust Log %s is whitelisted", processName);
+	//}
+      } else {
+	ALOGD("Whitelist failed to open: %s",strerror(errno));
+      }
+      
+#else
+    // check if we're some sort of preinitialization process
+    if (!strncmp(processName, "zygote",6) || !strncmp(processName, "system_server", 6) || !strncmp(processName, "unknown", 6)
+	|| !strncmp(processName, "<pre", 4) || !strncmp(processName, "dexopt", 6)) {
+
+      // if we are and we've already been initialized bail out
+      if (preinit && preDone) {
+	return;
+      }
+
+      notLogged = fopen("/sdcard/robust/notLogged.txt", "at" );
+      others = fopen("/sdcard/robust/others.txt", "at" );
+      if (notLogged != NULL) {
+	ALOGD("Robust Test file open successful");
+	// set the buffer for others to something fairly large
+	// since it's shared across processes
+	setvbuf(fileLog, NULL, _IOFBF, 40960);
+      } else {
+	ALOGD("Robust Log Test fail open /sdcard/robust/notLogged.txt %s",strerror(errno));
+      }
+      preinit = 1;
+    } else {
+      preinit = 0; // we're a regular process
+    }
+#endif
 
     //#ifdef snappyDebugging
     ALOGD("Robust Log %s != zygote not skipping", processName);
@@ -1503,7 +1530,7 @@ void _initLogFile()
     char polFile[] = "/sdcard/robust/GCPolicy.txt";
     char polVal[5];
     char uniqName[64];
-	char enableDump[] = "       false";
+    char enableDump[] = "       false";
 
     // check and see if we have GC policy
     // file to read the policy from
@@ -1517,7 +1544,7 @@ void _initLogFile()
         #endif
         fscanf(fdPol, "%s", polVal);
         fscanf(fdPol, "%s", uniqName);
-		fscanf(fdPol, "%s", enableDump);
+	fscanf(fdPol, "%s", enableDump);
         fclose(fdPol);
     } else {
         // defaults
@@ -1548,22 +1575,22 @@ void _initLogFile()
             skipLogging = 0;
          }
          if (polNumb < 0) {
-             skipLogging = 1;
-             polNumb = polNumb * -1;
-             //#ifdef snappyDebugging
-             ALOGD("Robust Log Skipping GC/Malloc logging using policy %d skipLogging %d", polNumb, skipLogging);
-             //#endif
+	   skipLogging = 1;
+	   polNumb = polNumb * -1;
+	   //#ifdef snappyDebugging
+	   ALOGD("Robust Log Skipping GC/Malloc logging using policy %d skipLogging %d", polNumb, skipLogging);
+	   //#endif
          }
          if ((polNumb > 0) && (polNumb <= NUM_POLICIES)) {
             polNumb = polNumb;
          } else {
-			polNumb = DEFAULT_POLICY;
-		}
-		ALOGD("Robust Log enable dlmStats %s",enableDump);
-        dlmStats = atoi(enableDump);
-		if (dlmStats) {
-			ALOGD("Robust Log Enabling dlmStats");
-		}
+	   polNumb = DEFAULT_POLICY;
+	 }
+	 ALOGD("Robust Log enable dlmStats %s",enableDump);
+	 dlmStats = atoi(enableDump);
+	if (dlmStats) {
+	  ALOGD("Robust Log Enabling dlmStats");
+	}
     }
         
     // set up the policy we'll be executing
@@ -1603,9 +1630,9 @@ void _initLogFile()
     strcat(fileName, processName);
     strcat(fileName, ".txt");
 
-	char memDup[100];
-	char memDir[] = "/sdcard/robust_data/";
-	strcpy(memDup, memDir);
+    char memDup[100];
+    char memDir[] = "/sdcard/robust_data/";
+    strcpy(memDup, memDir);
     strcat(memDup, processName);
     strcat(memDup, ".dxt");
 
@@ -1614,46 +1641,46 @@ void _initLogFile()
 	ALOGD("Filelog %p",fileLog);
     #endif
     fileLog = fopen(fileName, "at" );
-	memDumpFile = fopen(memDup, "at" );
+    memDumpFile = fopen(memDup, "at" );
 	
 
-	logPrefix[0] = '\0';
-	#ifdef logOthers
-	// if we couldn't open the log for whatever reason
-	// print logs in the others catchall log
-	if (!fileLog) {
-		fileLog = others;
-		sprintf(logPrefix, "%s.txt#%llu",processName,dvmGetRTCTimeMsec());
-	}
-	#endif
+    logPrefix[0] = '\0';
+#ifdef logOthers
+    // if we couldn't open the log for whatever reason
+    // print logs in the others catchall log
+    if (!fileLog) {
+      fileLog = others;
+      sprintf(logPrefix, "%s.txt#%llu",processName,dvmGetRTCTimeMsec());
+    }
+#endif
     if (fileLog != NULL) {
-        // bump our buffer log size to 12k
-        setvbuf(fileLog, NULL, _IOFBF, 12287);
+      // bump our buffer log size to 12k
+      setvbuf(fileLog, NULL, _IOFBF, 12287);
+      
+      // catchall log needs to be a bit bigger to 
+      // cover all procs
+      if (fileLog == others)
+	setvbuf(fileLog, NULL, _IOFBF, 40000);
 
-		// catchall log needs to be a bit bigger to 
-		// cover all procs
-		if (fileLog == others)
-			setvbuf(fileLog, NULL, _IOFBF, 40000);
-
-        fprintf(fileLog, "\n\n%s@header{\"deviceName\":\"%s\",\"deviceID\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu,\"Build_ID\":\""BUILD_ID"\"}\n",
-            logPrefix, deviceName, uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
-		if (policyType & THROTTLE_THRESHOLD)
-			readThreshold();
-		ALOGD("Robust log reading threshold %d",threshold);
-        logReady = true;
-        inZygote = false; // out of zygote mode
-		preDone = 1; // we're a preinitialization process and we should be done here
-		ALOGD("Robust Log opened file %s", fileName);
-        return;
+      fprintf(fileLog, "\n\n%s@header{\"deviceName\":\"%s\",\"deviceID\":\"%s\",\"process\":\"%s\",\"pid\":%d,\"policy\":\"%d\",\"appStartTime-ms\":%llu,\"startTime\":\"%s\",\"timerResolution-ns\":%llu,\"Build_ID\":\""BUILD_ID"\"}\n",
+	      logPrefix, deviceName, uniqName, processName, pid, policyNumber,dvmGetRTCTimeMsec(), timeStart,diff2);
+      if (policyType & THROTTLE_THRESHOLD)
+	readThreshold();
+      ALOGD("Robust log reading threshold %d",threshold);
+      logReady = true;
+      inZygote = false; // out of zygote mode
+      preDone = 1; // we're a preinitialization process and we should be done here
+      ALOGD("Robust Log opened file %s", fileName);
+      return;
     } else {
-        // all else failed
-        fprintf(notLogged, "%s %d\n",processName, policyNumber);
-        fflush(notLogged);
-        ALOGD("Robust Log fail open %s %s", fileName,strerror(errno));
-        logReady = false;
-		inZygote = false;
-		preDone = 1; // inits should never reach here but just in case
-        return;
+      // all else failed
+      fprintf(notLogged, "%s %d\n",processName, policyNumber);
+      fflush(notLogged);
+      ALOGD("Robust Log fail open %s %s", fileName,strerror(errno));
+      logReady = false;
+      inZygote = false;
+      preDone = 1; // inits should never reach here but just in case
+      return;
     }
 }
 
@@ -2247,45 +2274,54 @@ FILE* mallocLogFile = NULL;
 bool ifProcessInit = false;
 int testMethod(char *logMessage)
 {
-	u8 wcTime = dvmGetRTCTimeMsec();
-	u8 appTime = dvmGetTotalProcessCpuTimeMsec();
-	int mSuccess = -1;
+  u8 wcTime = dvmGetRTCTimeMsec();
+  u8 appTime = dvmGetTotalProcessCpuTimeMsec();
+  int mSuccess = -1;
 	
-	if (!ifProcessInit) {
-		const char* processName = get_process_name();
-		char myProcessName[128];
-		strcpy(myProcessName, processName);
-		char baseDir[] = "/sdcard/robust/";
-		char mFileName[128];
-		strcpy(mFileName, baseDir);
-		strcat(mFileName, myProcessName);
-		strcat(mFileName, ".dlm");
-		mallocLogFile = fopen(mFileName, "at");
-		ifProcessInit = true;
+  if (!ifProcessInit) {
+    const char* processName = get_process_name();
+    char myProcessName[128];
+    strcpy(myProcessName, processName);
+    char baseDir[] = "/sdcard/robust/";
+    char mFileName[128];
+    strcpy(mFileName, baseDir);
+    strcat(mFileName, myProcessName);
+    strcat(mFileName, ".dlm");
+    mallocLogFile = fopen(mFileName, "at");
+    ifProcessInit = true;
 		
-		if (mallocLogFile) {
-			fprintf(mallocLogFile, "\nBegin logging:\nwcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
-					wcTime, appTime, logMessage);
-			fflush(mallocLogFile);
-			mSuccess = 1;
-		} else {
-			ALOGD("dlmstats_init %s can't open file %s\n", myProcessName, strerror(errno));
-			mSuccess = 0;
-		}
-		logMessage[0] = '\0';
-	} else {
-		if (mallocLogFile) {
-			fprintf(mallocLogFile, "\nwcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
-					wcTime, appTime, logMessage);
-			fflush(mallocLogFile);
-			mSuccess = 1;
-		} else {
-			ALOGD("dlmstats %s can't open file %s\n", get_process_name(), strerror(errno));
-			mSuccess = 0;
-		}
-		logMessage[0] = '\0';
-	}
-	return mSuccess;
+    if (mallocLogFile) {
+      fprintf(mallocLogFile, "\nBegin logging:\nwcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
+	      wcTime, appTime, logMessage);
+      fflush(mallocLogFile);
+      mSuccess = 1;
+    } else {
+      ALOGD("dlmstats_init %s can't open file %s\n", myProcessName, strerror(errno));
+      mSuccess = 0;
+    }
+    logMessage[0] = '\0';
+  } else {
+    if (mallocLogFile) {
+      fprintf(mallocLogFile, "\nwcTime-ms:%llu\nappTime-ms:%llu\n%s\n",
+	      wcTime, appTime, logMessage);
+      fflush(mallocLogFile);
+      mSuccess = 1;
+    } else {
+      ALOGD("dlmstats %s can't open file %s\n", get_process_name(), strerror(errno));
+      mSuccess = 0;
+    }
+    logMessage[0] = '\0';
+  }
+  return mSuccess;
+}
+
+int addTimeStamp(char *mallocLogFile)
+{
+  u8 wcTime = dvmGetRTCTimeMsec();
+  u8 appTime = dvmGetTotalProcessCpuTimeMsec();
+  unsigned int endOfString = sprintf(mallocLogFile, "\nwcTime-ms:%llu\nappTime-ms:%llu\n",
+	  wcTime, appTime);
+  return endOfString;
 }
 
 int dlmStats = 0;
