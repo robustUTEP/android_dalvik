@@ -4796,6 +4796,25 @@ void dlfree(void* mem) {
         size_t psize = chunksize(p);
         mchunkptr next = chunk_plus_offset(p, psize);
         if (!pinuse(p)) {
+
+	  //robustdl
+	    if (dlmStats) {	    	
+	      if (mCount < LOGRATE) { /* add entry to buffer */
+		bufferPosition = sprintf((char*)logBuffer+bufferPosition, "F %p\n", mem);
+		mCount++; tCount++;
+	      } else { /* flush buffer to file */
+		mCount = 0; tCount = 0;
+		sprintf((char*)logBuffer+bufferPosition,"F %p\n", mem);
+		testMethod((char*)logBuffer);
+		bufferPosition = 0;
+	      }
+	      if (tCount >= 5000 && mCount != LOGRATE) { /* add timestamp */
+		bufferPosition = addTimeStamp((char*)logBuffer+bufferPosition);
+		tCount = 0;
+	      } 	      
+	    }
+	    //endrobustdl
+
           size_t prevsize = p->prev_foot;
           if (is_mmapped(p)) {
             psize += prevsize + MMAP_FOOT_PAD;
@@ -5196,6 +5215,23 @@ static size_t internal_bulk_free(mstate m, void* array[], size_t nelem) {
     for (a = array; a != fence; ++a) {
       void* mem = *a;
       if (mem != 0) {
+	//robustdl
+	if (dlmStats) {	    	
+	  if (mCount < LOGRATE) { /* add entry to buffer */
+	    bufferPosition = sprintf((char*)logBuffer+bufferPosition, "F %p\n", mem);
+	    mCount++; tCount++;
+	  } else { /* flush buffer to file */
+	    mCount = 0; tCount = 0;
+	    sprintf((char*)logBuffer+bufferPosition,"F %p\n", mem);
+	    testMethod((char*)logBuffer);
+	    bufferPosition = 0;
+	  }
+	  if (tCount >= 5000 && mCount != LOGRATE) { /* add timestamp */
+	    bufferPosition = addTimeStamp((char*)logBuffer+bufferPosition);
+	    tCount = 0;
+	  } 	      
+	}//endrobustdl
+            
         mchunkptr p = mem2chunk(mem);
         size_t psize = chunksize(p);
 #if FOOTERS
@@ -5212,25 +5248,7 @@ static size_t internal_bulk_free(mstate m, void* array[], size_t nelem) {
           if (b != fence && *b == chunk2mem(next)) {
             size_t newsize = chunksize(next) + psize;
             set_inuse(m, p, newsize);
-
-	    //robustdl
-	    if (dlmStats) {	    	
-	      if (mCount < LOGRATE) { /* add entry to buffer */
-		bufferPosition = sprintf((char*)logBuffer+bufferPosition, "F %p\n", b);
-		mCount++; tCount++;
-	      } else { /* flush buffer to file */
-		mCount = 0; tCount = 0;
-		sprintf((char*)logBuffer+bufferPosition,"F %p\n", b);
-		testMethod((char*)logBuffer);
-		bufferPosition = 0;
-	      }
-	      if (tCount == 5000 && mCount != LOGRATE) { /* add timestamp */
-		bufferPosition = addTimeStamp((char*)logBuffer+bufferPosition);
-		tCount = 0;
-	      } 	      
-	    }
-	    //endrobustdl
-            *b = chunk2mem(p);
+	    *b = chunk2mem(p);
           }
           else
             dispose_chunk(m, p, psize);
@@ -5241,27 +5259,26 @@ static size_t internal_bulk_free(mstate m, void* array[], size_t nelem) {
         }
       }
       //robustdl
-      if (dlmStats) {
-        if (mem != freePrevious) {
-          freePrevious = mem;
-	  if (mCount < LOGRATE) { /* add entry to buffer */
-            bufferPosition = sprintf((char*)logBuffer+bufferPosition, "F %p\n", mem);
-	    mCount++; tCount++;
-          } else { /* flush buffer to file */
-            mCount = 0; tCount = 0;
-            sprintf((char*)logBuffer+bufferPosition,"F %p\n", mem);
-	    testMethod((char*)logBuffer);
-            bufferPosition = 0;
-	  }
-	  if (tCount == 5000 && mCount != LOGRATE) { /* add timestamp */
-	    bufferPosition = addTimeStamp((char*)logBuffer+bufferPosition);
-	    tCount = 0;
-	  } 
-        }
-      }
-      //endrobustdl
-    if (should_trim(m, m->topsize))
-      sys_trim(m, 0);
+      /* if (dlmStats) { */
+      /*   if (mem != freePrevious) { */
+      /*     freePrevious = mem; */
+      /* 	  if (mCount < LOGRATE) { /\* add entry to buffer *\/ */
+      /*       bufferPosition = sprintf((char*)logBuffer+bufferPosition, "F %p\n", mem); */
+      /* 	    mCount++; tCount++; */
+      /*     } else { /\* flush buffer to file *\/ */
+      /*       mCount = 0; tCount = 0; */
+      /*       sprintf((char*)logBuffer+bufferPosition,"F %p\n", mem); */
+      /* 	    testMethod((char*)logBuffer); */
+      /*       bufferPosition = 0; */
+      /* 	  } */
+      /* 	  if (tCount >= 5000 && mCount != LOGRATE) { /\* add timestamp *\/ */
+      /* 	    bufferPosition = addTimeStamp((char*)logBuffer+bufferPosition); */
+      /* 	    tCount = 0; */
+      /* 	  }  */
+      /*   } */
+      } //endrobustdl
+      if (should_trim(m, m->topsize))
+	sys_trim(m, 0);
     }
     
     POSTACTION(m);
@@ -5753,7 +5770,7 @@ void* mspace_malloc(mspace msp, size_t bytes) {
           testMethod((char*)logBuffer);
 	  bufferPosition = 0;
 	}
-	if(tCount == 5000 && mCount != LOGRATE) { /* add time stamp */
+	if(tCount >= 5000 && mCount != LOGRATE) { /* add time stamp */
 	  bufferPosition = addTimeStamp((char*)logBuffer+bufferPosition);
 	  tCount = 0;
 	} 
@@ -5783,12 +5800,29 @@ void mspace_free(mspace msp, void* mem) {
       check_inuse_chunk(fm, p);
       if (RTCHECK(ok_address(fm, p) && ok_inuse(p))) {
         size_t psize = chunksize(p);
-        mchunkptr next = chunk_plus_offset(p, psize);
-        
-//        freeChunks[mCount] = mem; //robust
+        mchunkptr next = chunk_plus_offset(p, psize);        
         
         if (!pinuse(p)) {
           size_t prevsize = p->prev_foot;
+
+	  //robustdl
+	    if (dlmStats) {	    	
+	      if (mCount < LOGRATE) { /* add entry to buffer */
+		bufferPosition = sprintf((char*)logBuffer+bufferPosition, "F %p\n", mem);
+		mCount++; tCount++;
+	      } else { /* flush buffer to file */
+		mCount = 0; tCount = 0;
+		sprintf((char*)logBuffer+bufferPosition,"F %p\n", mem);
+		testMethod((char*)logBuffer);
+		bufferPosition = 0;
+	      }
+	      if (tCount >= 5000 && mCount != LOGRATE) { /* add timestamp */
+		bufferPosition = addTimeStamp((char*)logBuffer+bufferPosition);
+		tCount = 0;
+	      } 	      
+	    }
+	    //endrobustdl
+
           if (is_mmapped(p)) {
             psize += prevsize + MMAP_FOOT_PAD;
             if (CALL_MUNMAP((char*)p - prevsize, psize) == 0)
@@ -5865,23 +5899,7 @@ void mspace_free(mspace msp, void* mem) {
     erroraction:
       USAGE_ERROR_ACTION(fm, p);
     postaction:
-
 //      freeChunks[mCount] = mem; //robust
-//      mCount++;
-//      
-//      if (mCount == LOGRATE) {
-//        mCount = 0;
-//        if (dlmStats) {
-//          unsigned int i;
-//          char tmp[128] = {0};
-//          for (i=0; i < LOGRATE; ++i) {
-//            sprintf(tmp,"F %p\n", freeChunks[i]);
-//            strcat(logBuffer, tmp);
-//          }
-//          strcat(logBuffer, tmp);
-//          testMethod((char*)logBuffer);
-//        }
-//      }
       POSTACTION(fm);
     }
   }
